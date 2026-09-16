@@ -6,20 +6,23 @@ import { colors, spacing } from "../../../shared/theme";
 import { StyleSheet, View } from "react-native";
 
 type VoiceView = React.ComponentType;
-const unavailableMessage = "El registro por voz requiere la versión de desarrollo de la aplicación.";
 
-/** Keeps the existing Expo Go/development-build fallback without putting logic in the route file. */
+/**
+ * La voz es opcional: los hooks usan loader seguro (Expo Go compatible),
+ * así que esta pantalla solo carga la vista y deja que el micrófono
+ * se degrade a entrada manual cuando no hay módulo nativo.
+ */
 export function RegistroVozScreen() {
   const [view, setView] = useState<VoiceView | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let active = true;
-    Promise.all([import("expo-speech-recognition"), import("./VoiceCommandView")])
-      .then(([, module]) => { if (active) setView(() => module.default ?? module.VoiceCommandView); })
-      .catch(() => { if (active) setUnavailable(true); });
+    import("./VoiceCommandView")
+      .then((module) => { if (active) setView(() => module.default ?? module.VoiceCommandView); })
+      .catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
   }, []);
-  if (unavailable) return <ScreenContainer scroll><Card mode="outlined"><Card.Content style={styles.content}><Text variant="titleLarge">Registro por voz</Text><Text style={styles.copy}>{unavailableMessage}</Text><Button mode="contained" onPress={() => router.back()}>Volver</Button></Card.Content></Card></ScreenContainer>;
+  if (failed) return <ScreenContainer scroll><Card mode="outlined"><Card.Content style={styles.content}><Text variant="titleLarge">Registro por voz</Text><Text style={styles.copy}>No se pudo cargar el registro por voz.</Text><Button mode="contained" onPress={() => router.back()}>Volver</Button></Card.Content></Card></ScreenContainer>;
   if (view) { const VoiceCommand = view; return <VoiceCommand />; }
   return <ScreenContainer><View style={styles.loading}><ActivityIndicator color={colors.primary} /><Text>Cargando registro por voz...</Text></View></ScreenContainer>;
 }

@@ -242,7 +242,7 @@ function VentasContent() {
                   {product.codigo} · Stock {stockFor(product.id)}
                 </Text>
               </View>
-              <Button compact disabled={stockFor(product.id) <= 0}>
+              <Button compact disabled={stockFor(product.id) <= 0} onPress={() => addProduct(product)}>
                 Agregar
               </Button>
             </Card.Content>

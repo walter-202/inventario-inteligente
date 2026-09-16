@@ -1,7 +1,7 @@
 import type { Producto } from "../../../shared/types/domain";
 import { obtenerProductos } from "../../productos/api/productosApi";
 import { matchProduct } from "../lib/productMatching";
-import { interpretarTextoVoz, type ProductoInterpretado } from "./aiInterpretationService";
+import { interpretarTextoVoz, esFraseDeCorreccion, extraerCantidad, extraerFraseCorregida, limpiarNombreProducto, type ProductoInterpretado } from "./aiInterpretationService";
 import { obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
 import { obtenerDashboardMetrics } from "../../dashboard/api/dashboardApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
@@ -17,7 +17,8 @@ export interface StockSucursalDetalle {
 
 export type ResultadoInterpretacion =
   | { tipo: "aclaracion"; mensaje: string }
-  | { tipo: "venta"; lineas: LineaInterpretada[] }
+  | { tipo: "registro_producto"; mensaje: string }
+  | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean }
   | {
       tipo: "consulta_stock";
       producto: Producto;
@@ -62,10 +63,36 @@ function validateItems(response: { accion?: string; productos?: ProductoInterpre
   return valid.length === response.productos.length ? valid : undefined;
 }
 
-export async function interpretarVoz(texto: string): Promise<ResultadoInterpretacion> {
+/** Contexto conversacional: último producto mencionado, para resolver correcciones ("sino 5"). */
+export interface VozContexto {
+  ultimoProductoNombre?: string;
+}
+
+export async function interpretarVoz(texto: string, contexto?: VozContexto): Promise<ResultadoInterpretacion> {
   const phrase = texto.trim();
   if (!phrase) return { tipo: "aclaracion", mensaje: "Primero reconocé o escribí la operación que querés registrar." };
   if (phrase.length > 500) return { tipo: "aclaracion", mensaje: "El texto reconocido es muy largo. Corregilo o reducilo y volvé a intentar." };
+
+  // Corrección con contexto ("sino corrige a 5", "mejor 3", "5"): reutiliza el
+  // último producto y solo cambia la cantidad, sin pasar por la IA.
+  // Si la corrección nombra otro producto ("sino 3 chompas"), sigue la vía normal.
+  if (contexto?.ultimoProductoNombre && esFraseDeCorreccion(phrase)) {
+    const frase = extraerFraseCorregida(phrase);
+    const sinCantidad = limpiarNombreProducto(frase.replace(/\d+/g, " "))
+      .replace(/\b(un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!sinCantidad) {
+      const cantidad = extraerCantidad(frase) ?? extraerCantidad(phrase);
+      if (cantidad) {
+        const product = await resolveProduct(contexto.ultimoProductoNombre);
+        if (product) {
+          return { tipo: "venta", lineas: [{ producto: product, cantidadSolicitada: cantidad }], fueCorreccion: true };
+        }
+      }
+    }
+  }
+
   let response;
   try {
     response = await interpretarTextoVoz(phrase);
@@ -75,7 +102,8 @@ export async function interpretarVoz(texto: string): Promise<ResultadoInterpreta
 
   // 1. Stock inquiry
   if (response.accion === "consulta_stock") {
-    const query = response.consulta?.producto?.trim() || response.productos?.[0]?.producto?.trim();
+    const rawQuery = response.consulta?.producto?.trim() || response.productos?.[0]?.producto?.trim();
+    const query = rawQuery ? limpiarNombreProducto(rawQuery) : "";
     if (!query) {
       return { tipo: "aclaracion", mensaje: "¿De qué producto querés consultar el stock disponible?" };
     }
@@ -148,14 +176,27 @@ export async function interpretarVoz(texto: string): Promise<ResultadoInterpreta
     };
   }
 
+  // 2b. Catalog registration (dar de alta una prenda): no es venta, se redirige.
+  if (response.accion === "registro_producto") {
+    return {
+      tipo: "registro_producto",
+      mensaje:
+        "Eso es un alta de catálogo (nombre, código, precio y stock de una prenda nueva), no una venta. Te llevo a Registrar prenda, donde el micrófono autocompleta los campos.",
+    };
+  }
+
   // 3. POS sale order
   if (response.accion === "venta") {
     const items = validateItems(response);
     if (!items) return { tipo: "aclaracion", mensaje: "No se pudo identificar claramente la operación o los productos. Corregí el texto y volvé a intentar." };
     const lines: LineaInterpretada[] = [];
     for (const item of items) {
-      const product = await resolveProduct(item.producto);
-      if (!product) throw new InterpretacionError(`No se encontró el producto "${item.producto}". Corregí el texto y volvé a intentar.`);
+      const nombreLimpio = limpiarNombreProducto(item.producto);
+      if (!nombreLimpio) {
+        return { tipo: "aclaracion", mensaje: `Entendí la cantidad (${item.cantidad}) pero no el producto. Escribí el nombre o el código SKU, por ejemplo "Vender ${item.cantidad} Jean Mom Fit".` };
+      }
+      const product = await resolveProduct(nombreLimpio);
+      if (!product) throw new InterpretacionError(`No se encontró el producto "${nombreLimpio}". Corregí el texto y volvé a intentar.`);
       lines.push({ producto: product, cantidadSolicitada: item.cantidad });
     }
     return lines.length ? { tipo: "venta", lineas: lines } : { tipo: "aclaracion", mensaje: "No se pudo identificar ningún producto. Corregí el texto y volvé a intentar." };

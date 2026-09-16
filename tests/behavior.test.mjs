@@ -234,7 +234,15 @@ test("voice assistant heuristic extracts stock query and branch correctly", () =
   assert.equal(res2.consulta?.sucursal, null);
 });
 
-test("voice assistant heuristic extracts daily sales query intent and branch correctly", () => {
+test("voice assistant heuristic detects catalog registration intent", () => {
+  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+
+  const res1 = interpretarHeuristica("quiero registrar una prenda nueva, es una chompa de alpaca código CHO-520");
+  assert.equal(res1.accion, "registro_producto");
+
+  const res2 = interpretarHeuristica("vender 2 Jean Mom Fit");
+  assert.equal(res2.accion, "venta");
+});
   const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
 
   const query1 = "¿cuánto se vendió hoy?";

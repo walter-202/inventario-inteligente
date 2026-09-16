@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
+import type { PermissionResponse } from "expo-modules-core";
+import {
+  getSpeechRecognitionModule,
+  isSpeechRecognitionAvailable,
+  useSpeechRecognitionEventSafe,
+} from "../../../shared/lib/speechRecognition";
 import {
   interpretarRegistroProducto,
   type RegistroProductoParsed,
 } from "../../asistente-ia/api/voiceRegistrationService";
 
-type SpeechPermission = Awaited<ReturnType<typeof ExpoSpeechRecognitionModule.getPermissionsAsync>>;
+type SpeechPermission = PermissionResponse & { restricted?: boolean };
 
 export type VoiceRegistrationState = "idle" | "listening" | "interpreting" | "done" | "error";
 
+export const VOICE_UNAVAILABLE_MESSAGE =
+  "El dictado por voz requiere un development build. Podés usar los ejemplos de IA para autocompletar.";
+
 /**
  * Hook for voice-assisted product registration.
- * Returns speech recognition state, partial transcript, and parsed product fields.
+ * Expo Go-safe: si el módulo nativo no existe, el dictado se
+ * desactiva pero `interpretPhrase` (texto → IA) sigue funcionando.
  */
 export function useVoiceRegistration() {
+  const [isAvailable] = useState(isSpeechRecognitionAvailable);
   const [permission, setPermission] = useState<SpeechPermission | null>(null);
   const [permissionLoading, setPermissionLoading] = useState(true);
   const [transcript, setTranscript] = useState("");
@@ -23,9 +33,15 @@ export function useVoiceRegistration() {
 
   // Load permission on mount
   const loadPermission = useCallback(async () => {
+    const native = getSpeechRecognitionModule();
+    if (!native) {
+      setPermission(null);
+      setPermissionLoading(false);
+      return;
+    }
     setPermissionLoading(true);
     try {
-      setPermission(await ExpoSpeechRecognitionModule.getPermissionsAsync());
+      setPermission((await native.getPermissionsAsync()) as SpeechPermission);
     } catch {
       setPermission(null);
     } finally {
@@ -35,9 +51,16 @@ export function useVoiceRegistration() {
   useEffect(() => { void loadPermission(); }, [loadPermission]);
 
   const requestPermission = useCallback(async () => {
+    const native = getSpeechRecognitionModule();
+    if (!native) {
+      setPermission(null);
+      setPermissionLoading(false);
+      setError(VOICE_UNAVAILABLE_MESSAGE);
+      return;
+    }
     setPermissionLoading(true);
     try {
-      setPermission(await ExpoSpeechRecognitionModule.requestPermissionsAsync());
+      setPermission((await native.requestPermissionsAsync()) as SpeechPermission);
     } catch {
       setPermission(null);
     } finally {
@@ -45,8 +68,8 @@ export function useVoiceRegistration() {
     }
   }, []);
 
-  // Speech recognition events
-  useSpeechRecognitionEvent("result", (event) => {
+  // Speech recognition events (no-op en Expo Go)
+  useSpeechRecognitionEventSafe("result", (event) => {
     const value = event.results?.[0]?.transcript ?? "";
     if (value) setTranscript(value);
     if (event.isFinal) {
@@ -54,14 +77,14 @@ export function useVoiceRegistration() {
     }
   });
 
-  useSpeechRecognitionEvent("error", (event) => {
+  useSpeechRecognitionEventSafe("error", (event) => {
     if (event.error !== "aborted") {
       setError(event.message || `Recognition error: ${event.error}`);
       setState("error");
     }
   });
 
-  useSpeechRecognitionEvent("end", () => {
+  useSpeechRecognitionEventSafe("end", () => {
     setState((prev) => (prev === "listening" ? "interpreting" : prev));
   });
 
@@ -87,6 +110,12 @@ export function useVoiceRegistration() {
   }, [state, transcript]);
 
   const startListening = useCallback(() => {
+    const native = getSpeechRecognitionModule();
+    if (!native) {
+      setError(VOICE_UNAVAILABLE_MESSAGE);
+      setState("error");
+      return;
+    }
     if (!permission?.granted) {
       setError("Necesitamos permiso del micrófono.");
       setState("error");
@@ -97,7 +126,7 @@ export function useVoiceRegistration() {
     setResult(null);
     setState("listening");
     try {
-      ExpoSpeechRecognitionModule.start({
+      native.start({
         lang: "es-BO",
         interimResults: true,
         maxAlternatives: 1,
@@ -109,7 +138,7 @@ export function useVoiceRegistration() {
   }, [permission]);
 
   const stopListening = useCallback(() => {
-    if (state === "listening") ExpoSpeechRecognitionModule.stop();
+    if (state === "listening") getSpeechRecognitionModule()?.stop();
   }, [state]);
 
   const reset = useCallback(() => {
@@ -138,6 +167,7 @@ export function useVoiceRegistration() {
   }, []);
 
   return {
+    isAvailable,
     permission,
     permissionLoading,
     requestPermission,

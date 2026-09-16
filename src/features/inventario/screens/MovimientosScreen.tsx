@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
-import { ArrowRightLeft, Search, X } from "lucide-react-native";
+import { ArrowRightLeft, Check, Search, Store, X } from "lucide-react-native";
 import { ActivityIndicator, Button, Card, Chip, HelperText, Searchbar, SegmentedButtons, Text, TextInput } from "react-native-paper";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
 import { colors, spacing } from "../../../shared/theme";
 import { extraerMensajeError } from "../../../shared/lib/utils";
+import { formatBranchName } from "../../../shared/lib/branchNames";
 import type { Producto } from "../../../shared/types/domain";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useProductos } from "../../productos/hooks/useProductos";
@@ -62,8 +63,194 @@ function MovimientosForm() {
     movement.mutate(input, { onSuccess: () => { Alert.alert("Movimiento registrado", "La operación se registró correctamente."); setProduct(null); setQuantity("1"); setNote(""); }, onError: (error) => setFormError(extraerMensajeError(error, "No se pudo registrar el movimiento.")) });
   };
   const selectedTransferItem: InventarioItem | null = inventoryItem ?? (product && branchId !== null ? { id: -1, producto_id: product.id, sucursal_id: branchId, cantidad: 0, producto: product, sucursal: { id: branchId, nombre: selectedBranchName } } : null);
-  return <ScreenContainer><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"><AppHeader title="Movimientos" subtitle="Entradas, salidas y transferencias" /><SegmentedButtons value={type} onValueChange={chooseType} buttons={[{ value: "entrada", label: "Entrada", showSelectedCheck: false }, { value: "salida", label: "Salida", showSelectedCheck: false }, { value: "transferencia", label: "Transferencia", showSelectedCheck: false }]} /><Text variant="labelLarge" style={styles.label}>Sucursal {type === "transferencia" ? "de origen" : ""}</Text><View style={styles.chips}>{originBranches.map((branch) => <Chip key={branch.id} selected={branch.id === branchId} showSelectedCheck={false} onPress={() => setBranchId(branch.id)}>{branch.nombre}</Chip>)}</View>{type === "transferencia" ? <><Text variant="labelLarge" style={styles.label}>Sucursal de destino</Text><View style={styles.chips}>{(branches.data ?? []).filter((branch) => branch.id !== branchId).map((branch) => <Chip key={branch.id} selected={branch.id === destinationId} showSelectedCheck={false} onPress={() => setDestinationId(branch.id)}>{branch.nombre}</Chip>)}</View></> : null}<Text variant="labelLarge" style={styles.label}>Producto</Text>{product ? <Card mode="outlined"><Card.Content style={styles.selected}><View style={styles.selectedCopy}><Text variant="titleMedium">{product.nombre}</Text><Text style={styles.muted}>{product.codigo} · Stock {inventoryItem?.cantidad ?? 0}</Text></View><Button compact onPress={() => setProduct(null)}>Quitar</Button></Card.Content></Card> : <><Searchbar value={search} onChangeText={setSearch} placeholder="Buscar por nombre o código" icon={() => <Search size={20} color={colors.textSecondary} />} clearIcon={() => <X size={20} color={colors.textSecondary} />} />{products.isFetching ? <ActivityIndicator style={styles.loader} /> : results.map((value) => <Card key={value.id} mode="outlined" style={styles.result} onPress={() => chooseProduct(value)}><Card.Content><Text variant="titleSmall">{value.nombre}</Text><Text style={styles.muted}>{value.codigo} · {value.categoria}</Text></Card.Content></Card>)}{deferredSearch.trim() && products.hasNextPage ? <Button mode="text" onPress={() => products.fetchNextPage()} loading={products.isFetchingNextPage}>Cargar más resultados</Button> : null}</>} {type !== "transferencia" ? <><TextInput mode="outlined" label="Cantidad" keyboardType="number-pad" value={quantity} onChangeText={setQuantity} style={styles.field} /><TextInput mode="outlined" label="Observación (opcional)" value={note} onChangeText={setNote} maxLength={500} style={styles.field} /></> : null}<HelperText type="error" visible={Boolean(formError || movement.error)}>{formError || (movement.error ? extraerMensajeError(movement.error, "No se pudo registrar el movimiento.") : "")}</HelperText>{type === "transferencia" ? <Button mode="contained" icon={() => <ArrowRightLeft size={18} color={colors.white} />} onPress={() => { if (!selectedTransferItem || !destinationId) { setFormError("Seleccioná producto, origen y destino."); return; } setTransferVisible(true); }} disabled={!product || !branchId || !destinationId}>Transferir stock</Button> : <Button mode="contained" onPress={submit} loading={movement.isPending} disabled={movement.isPending || !product}>Registrar {type}</Button>}</ScrollView><TransferModal visible={transferVisible} item={selectedTransferItem} branches={branches.data ?? []} initialDestinationId={destinationId} onDismiss={() => setTransferVisible(false)} loading={movement.isPending} error={movement.error ? extraerMensajeError(movement.error, "No se pudo registrar la transferencia.") : null} onSubmit={(params) => movement.mutate({ tipo: "transferencia", params }, { onSuccess: () => { setTransferVisible(false); setProduct(null); Alert.alert("Transferencia registrada", "La transferencia se registró correctamente."); } })} /></ScreenContainer>;
+  return (
+    <ScreenContainer>
+      <View style={styles.screen}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+        <AppHeader title="Movimientos" subtitle="Entradas, salidas y transferencias" />
+        <SegmentedButtons
+          value={type}
+          onValueChange={chooseType}
+          buttons={[
+            { value: "entrada", label: "Entrada", showSelectedCheck: false },
+            { value: "salida", label: "Salida", showSelectedCheck: false },
+            { value: "transferencia", label: "Transferencia", showSelectedCheck: false },
+          ]}
+        />
+        <Text variant="labelLarge" style={styles.label}>
+          {type === "transferencia" ? "Sucursal de origen" : "Sucursal"}
+        </Text>
+        <View style={styles.chips}>
+          {originBranches.map((branch) => {
+            const isSelected = branch.id === branchId;
+            return (
+              <Chip
+                key={branch.id}
+                compact
+                selected={isSelected}
+                showSelectedCheck={false}
+                icon={() =>
+                  isSelected ? (
+                    <Check size={16} color={colors.primary} />
+                  ) : (
+                    <Store size={14} color={colors.textSecondary} />
+                  )
+                }
+                onPress={() => setBranchId(branch.id)}
+                style={[styles.branchChip, isSelected && styles.branchChipSelected]}
+                textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
+              >
+                {formatBranchName(branch.nombre)}
+              </Chip>
+            );
+          })}
+        </View>
+        {type === "transferencia" ? (
+          <>
+            <Text variant="labelLarge" style={styles.label}>Sucursal de destino</Text>
+            <View style={styles.chips}>
+              {(branches.data ?? []).filter((branch) => branch.id !== branchId).map((branch) => {
+                const isSelected = branch.id === destinationId;
+                return (
+                  <Chip
+                    key={branch.id}
+                    compact
+                    selected={isSelected}
+                    showSelectedCheck={false}
+                    icon={() =>
+                      isSelected ? (
+                        <Check size={16} color={colors.primary} />
+                      ) : (
+                        <Store size={14} color={colors.textSecondary} />
+                      )
+                    }
+                    onPress={() => setDestinationId(branch.id)}
+                    style={[styles.branchChip, isSelected && styles.branchChipSelected]}
+                    textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
+                  >
+                    {formatBranchName(branch.nombre)}
+                  </Chip>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+        <Text variant="labelLarge" style={styles.label}>Producto</Text>
+        {product ? (
+          <Card mode="outlined">
+            <Card.Content style={styles.selected}>
+              <View style={styles.selectedCopy}>
+                <Text variant="titleMedium">{product.nombre}</Text>
+                <Text style={styles.muted}>{product.codigo} · Stock {inventoryItem?.cantidad ?? 0}</Text>
+              </View>
+              <Button compact onPress={() => setProduct(null)}>Quitar</Button>
+            </Card.Content>
+          </Card>
+        ) : (
+          <>
+            <Searchbar
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Buscar por nombre o código"
+              icon={() => <Search size={20} color={colors.textSecondary} />}
+              clearIcon={() => <X size={20} color={colors.textSecondary} />}
+            />
+            {products.isFetching ? (
+              <ActivityIndicator style={styles.loader} />
+            ) : (
+              results.map((value) => (
+                <Card key={value.id} mode="outlined" style={styles.result} onPress={() => chooseProduct(value)}>
+                  <Card.Content>
+                    <Text variant="titleSmall">{value.nombre}</Text>
+                    <Text style={styles.muted}>{value.codigo} · {value.categoria}</Text>
+                  </Card.Content>
+                </Card>
+              ))
+            )}
+            {deferredSearch.trim() && products.hasNextPage ? (
+              <Button mode="text" onPress={() => products.fetchNextPage()} loading={products.isFetchingNextPage}>
+                Cargar más resultados
+              </Button>
+            ) : null}
+          </>
+        )}
+        {type !== "transferencia" ? (
+          <>
+            <TextInput
+              mode="outlined"
+              dense
+              label="Cantidad"
+              keyboardType="number-pad"
+              value={quantity}
+              onChangeText={setQuantity}
+              style={styles.field}
+            />
+            <TextInput
+              mode="outlined"
+              dense
+              label="Observación (opcional)"
+              value={note}
+              onChangeText={setNote}
+              maxLength={500}
+              style={styles.field}
+            />
+          </>
+        ) : null}
+        <HelperText type="error" visible={Boolean(formError || movement.error)}>
+          {formError || (movement.error ? extraerMensajeError(movement.error, "No se pudo registrar el movimiento.") : "")}
+        </HelperText>
+        </ScrollView>
+        <View style={styles.footer}>
+          {type === "transferencia" ? (
+            <Button
+              mode="contained"
+              icon={() => <ArrowRightLeft size={18} color={colors.white} />}
+              onPress={() => {
+                if (!selectedTransferItem || !destinationId) { setFormError("Seleccioná producto, origen y destino."); return; }
+                setTransferVisible(true);
+              }}
+              disabled={!product || !branchId || !destinationId}
+              style={styles.submitButton}
+              contentStyle={styles.submitButtonContent}
+            >
+              Transferir stock
+            </Button>
+          ) : (
+            <Button
+              mode="contained"
+              onPress={submit}
+              loading={movement.isPending}
+              disabled={movement.isPending || !product}
+              style={styles.submitButton}
+              contentStyle={styles.submitButtonContent}
+            >
+              Registrar {type}
+            </Button>
+          )}
+        </View>
+      </View>
+      <TransferModal
+        visible={transferVisible}
+        item={selectedTransferItem}
+        branches={branches.data ?? []}
+        initialDestinationId={destinationId}
+        onDismiss={() => setTransferVisible(false)}
+        loading={movement.isPending}
+        error={movement.error ? extraerMensajeError(movement.error, "No se pudo registrar la transferencia.") : null}
+        onSubmit={(params) => movement.mutate({ tipo: "transferencia", params }, {
+          onSuccess: () => {
+            setTransferVisible(false);
+            setProduct(null);
+            Alert.alert("Transferencia registrada", "La transferencia se registró correctamente.");
+          },
+        })}
+      />
+    </ScreenContainer>
+  );
 }
 
-const styles = StyleSheet.create({ content: { padding: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.md }, label: { marginTop: spacing.sm }, chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }, selected: { flexDirection: "row", alignItems: "center", gap: spacing.md }, selectedCopy: { flex: 1, gap: spacing.xs }, muted: { color: colors.textSecondary }, result: { marginTop: spacing.sm }, loader: { paddingVertical: spacing.md }, field: { marginTop: spacing.md } });
-
+const styles = StyleSheet.create({ screen: { flex: 1 }, scroll: { flex: 1 }, content: { padding: spacing.md, paddingBottom: spacing.md, gap: spacing.sm }, footer: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border }, submitButton: { borderRadius: 14 }, submitButtonContent: { height: 52 }, label: { marginTop: spacing.xs, fontWeight: "700", color: colors.textPrimary }, chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 }, branchChip: { backgroundColor: "#F8FAFC", borderColor: "#E2E8F0", borderWidth: 1, borderRadius: 10 }, branchChipSelected: { backgroundColor: colors.primarySoft, borderColor: colors.primary, borderWidth: 1.5 }, branchChipText: { color: colors.textPrimary, fontSize: 12 }, branchChipTextSelected: { color: colors.primary, fontWeight: "700", fontSize: 12 }, selected: { flexDirection: "row", alignItems: "center", gap: spacing.md }, selectedCopy: { flex: 1, gap: 2 }, muted: { color: colors.textSecondary }, result: { marginTop: spacing.sm }, loader: { paddingVertical: spacing.md }, field: { marginTop: spacing.xs } });

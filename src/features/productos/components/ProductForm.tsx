@@ -18,6 +18,7 @@ import {
 } from "lucide-react-native";
 import { ProductoInputSchema } from "../api/productosApi";
 import type { NuevoProductoParams, Sucursal } from "../../../shared/types/domain";
+import { formatBranchName } from "../../../shared/lib/branchNames";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
 import { useVoiceRegistration, type VoiceRegistrationState } from "../hooks/useVoiceRegistration";
 
@@ -146,14 +147,6 @@ const VOICE_EXAMPLES = [
   "Jean cargo negro código JEA-300 precio 195 cantidad 30 categoría Pantalones",
 ];
 
-// Helper to format long branch names cleanly
-function formatBranchName(rawName: string): string {
-  return rawName
-    .replace(/^Lidemoda\s+(?:La\s+Paz\s*[-–]?\s*)?(?:Sucursal\s*)?/i, "")
-    .replace(/^Sucursal\s*/i, "")
-    .trim() || rawName;
-}
-
 // ─── Main form ─────────────────────────────────────────────────────────────────
 
 interface ProductFormProps {
@@ -243,6 +236,11 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
   const handleMicPress = async () => {
     if (voice.state === "listening") {
       voice.stopListening();
+      return;
+    }
+    // Sin módulo nativo (Expo Go): ofrecer ejemplos de IA en lugar de crashear.
+    if (!voice.isAvailable) {
+      setShowExamples(true);
       return;
     }
     if (!voice.permission?.granted) {
