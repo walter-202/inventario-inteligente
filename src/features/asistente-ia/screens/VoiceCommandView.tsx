@@ -9,8 +9,10 @@ import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucur
 import { useProcesarVenta } from "../../ventas/hooks/useProcesarVenta";
 import { RegistroVozDrawer } from "../components/RegistroVozDrawer";
 import { ConfirmationModal } from "../components/ConfirmationModal";
+import { QueryResultModal } from "../components/QueryResultModal";
 import { useVoiceCommand } from "../hooks/useVoiceCommand";
 import { aggregateVoiceLines } from "../lib/voiceLines";
+import type { ResultadoInterpretacion } from "../api/voiceCommandApi";
 
 export function VoiceCommandView() {
   const voice = useVoiceCommand();
@@ -19,6 +21,7 @@ export function VoiceCommandView() {
   const sale = useProcesarVenta();
   const [branchId, setBranchId] = useState<number | null>(null);
   const [confirmation, setConfirmation] = useState<{ description: string; products: Array<{ producto_id: number; cantidad: number }> } | null>(null);
+  const [queryResult, setQueryResult] = useState<ResultadoInterpretacion | null>(null);
   const activeBranch = branchId ?? branches.data?.[0]?.id ?? null;
   const branchName = branches.data?.find((branch) => branch.id === activeBranch)?.nombre ?? "";
   const description = useMemo(() => confirmation?.description ?? "", [confirmation]);
@@ -26,15 +29,24 @@ export function VoiceCommandView() {
   const interpret = async () => {
     try {
       const result = await voice.interpret();
-      if (result.tipo !== "venta") { Alert.alert("Necesitamos más información", result.mensaje); return; }
-      if (activeBranch === null) { Alert.alert("Venta no disponible", "No hay sucursales disponibles."); return; }
-      const lines = aggregateVoiceLines(result.lineas).map((line) => {
-        const available = stock.data?.find((item) => item.sucursal_id === activeBranch && item.producto_id === line.producto.id)?.cantidad ?? 0;
-        return { ...line, available };
-      });
-      const unavailable = lines.find((line) => line.available < line.cantidadSolicitada);
-      if (unavailable) { Alert.alert("Stock insuficiente", `${unavailable.producto.nombre}: disponible ${unavailable.available}.`); return; }
-      setConfirmation({ description: lines.map((line) => `${line.cantidadSolicitada} × ${line.producto.nombre}`).join("\n"), products: lines.map((line) => ({ producto_id: line.producto.id, cantidad: line.cantidadSolicitada })) });
+      if (result.tipo === "aclaracion") {
+        Alert.alert("Asistente Lidemoda", result.mensaje);
+        return;
+      }
+      if (result.tipo === "consulta_stock" || result.tipo === "consulta_ventas") {
+        setQueryResult(result);
+        return;
+      }
+      if (result.tipo === "venta") {
+        if (activeBranch === null) { Alert.alert("Venta no disponible", "No hay sucursales disponibles."); return; }
+        const lines = aggregateVoiceLines(result.lineas).map((line) => {
+          const available = stock.data?.find((item) => item.sucursal_id === activeBranch && item.producto_id === line.producto.id)?.cantidad ?? 0;
+          return { ...line, available };
+        });
+        const unavailable = lines.find((line) => line.available < line.cantidadSolicitada);
+        if (unavailable) { Alert.alert("Stock insuficiente", `${unavailable.producto.nombre}: disponible ${unavailable.available}.`); return; }
+        setConfirmation({ description: lines.map((line) => `${line.cantidadSolicitada} × ${line.producto.nombre}`).join("\n"), products: lines.map((line) => ({ producto_id: line.producto.id, cantidad: line.cantidadSolicitada })) });
+      }
     } catch (error) {
       if (error instanceof Error && error.name === "AmbiguousVoiceLineError") {
         Alert.alert("Interpretación ambigua", error.message);
@@ -51,7 +63,47 @@ export function VoiceCommandView() {
   };
 
   if (voice.permissionLoading || branches.isLoading || stock.isLoading) return <ScreenContainer><ActivityIndicator color={colors.primary} /></ScreenContainer>;
-  return <ScreenContainer scroll><Text variant="titleLarge">Asistente de ventas</Text><Text>Sucursal activa: {branchName || "Sin sucursal"}</Text><View style={styles.chips}>{(branches.data ?? []).map((branch) => <Chip key={branch.id} selected={branch.id === activeBranch} showSelectedCheck={false} onPress={() => setBranchId(branch.id)}>{branch.nombre}</Chip>)}</View><RegistroVozDrawer visible transcript={voice.transcript} recording={voice.recording} interpreting={voice.interpreting} error={voice.error} permissionError={voice.permissionError} onTranscriptChange={voice.setTranscript} onStart={voice.start} onStop={voice.stop} onInterpret={interpret} onDismiss={() => router.back()} onRequestPermission={voice.requestPermission} permissionDenied={voice.permission?.granted !== true} /><ConfirmationModal visible={confirmation !== null} title="Confirmar venta por voz" description={`Sucursal: ${branchName}\n${description}`} loading={sale.isPending} onDismiss={() => setConfirmation(null)} onConfirm={confirm} /></ScreenContainer>;
+  return (
+    <ScreenContainer scroll>
+      <Text variant="titleLarge">Asistente por voz</Text>
+      <Text>Sucursal activa: {branchName || "Sin sucursal"}</Text>
+      <View style={styles.chips}>
+        {(branches.data ?? []).map((branch) => (
+          <Chip key={branch.id} selected={branch.id === activeBranch} showSelectedCheck={false} onPress={() => setBranchId(branch.id)}>
+            {branch.nombre}
+          </Chip>
+        ))}
+      </View>
+      <RegistroVozDrawer
+        visible
+        transcript={voice.transcript}
+        recording={voice.recording}
+        interpreting={voice.interpreting}
+        error={voice.error}
+        permissionError={voice.permissionError}
+        onTranscriptChange={voice.setTranscript}
+        onStart={voice.start}
+        onStop={voice.stop}
+        onInterpret={interpret}
+        onDismiss={() => router.back()}
+        onRequestPermission={voice.requestPermission}
+        permissionDenied={voice.permission?.granted !== true}
+      />
+      <ConfirmationModal
+        visible={confirmation !== null}
+        title="Confirmar venta por voz"
+        description={`Sucursal: ${branchName}\n${description}`}
+        loading={sale.isPending}
+        onDismiss={() => setConfirmation(null)}
+        onConfirm={confirm}
+      />
+      <QueryResultModal
+        visible={queryResult !== null}
+        result={queryResult}
+        onDismiss={() => setQueryResult(null)}
+      />
+    </ScreenContainer>
+  );
 }
 
 export default VoiceCommandView;

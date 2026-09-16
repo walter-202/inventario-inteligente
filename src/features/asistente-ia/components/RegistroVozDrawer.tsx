@@ -34,7 +34,12 @@ export function RegistroVozDrawer({ visible, transcript, recording, interpreting
               onChangeText={onTranscriptChange}
             />
             <SuggestionChips
-              suggestions={["Registrar una venta", "Vender dos productos"]}
+              suggestions={[
+                "Vender 2 Jean Mom Fit",
+                "¿Cuánto stock queda de Jean Mom Fit?",
+                "¿Cuánto se vendió hoy?",
+                "Stock de Vestido Floral en San Miguel",
+              ]}
               onSelect={onTranscriptChange}
             />
             <View style={styles.controls}>

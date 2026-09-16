@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { loadTsModule } from "./load-ts.mjs";
 
@@ -214,4 +216,50 @@ test("voice registration service extracts fields via heuristic when gateway fall
   assert.equal(result.precio, 150);
   assert.equal(result.cantidad, 25);
   assert.equal(result.categoria, "Blusas");
+});
+
+test("voice assistant heuristic extracts stock query and branch correctly", () => {
+  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+
+  const query1 = "¿cuánto stock queda de Jean Mom Fit en San Miguel?";
+  const res1 = interpretarHeuristica(query1);
+  assert.equal(res1.accion, "consulta_stock");
+  assert.equal(res1.consulta?.producto?.toLowerCase(), "jean mom fit");
+  assert.equal(res1.consulta?.sucursal, "san miguel");
+
+  const query2 = "¿cuánto stock hay de chompa roja?";
+  const res2 = interpretarHeuristica(query2);
+  assert.equal(res2.accion, "consulta_stock");
+  assert.equal(res2.consulta?.producto?.toLowerCase(), "chompa roja");
+  assert.equal(res2.consulta?.sucursal, null);
+});
+
+test("voice assistant heuristic extracts daily sales query intent and branch correctly", () => {
+  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+
+  const query1 = "¿cuánto se vendió hoy?";
+  const res1 = interpretarHeuristica(query1);
+  assert.equal(res1.accion, "consulta_ventas");
+  assert.equal(res1.consulta?.periodo, "hoy");
+  assert.equal(res1.consulta?.sucursal, null);
+
+  const query2 = "resumen de ventas de hoy en Comercio";
+  const res2 = interpretarHeuristica(query2);
+  assert.equal(res2.accion, "consulta_ventas");
+  assert.equal(res2.consulta?.periodo, "hoy");
+  assert.equal(res2.consulta?.sucursal, "comercio");
+});
+
+test("mobile build configuration contains valid EAS preview profile and Android package", () => {
+  const easPath = resolve("eas.json");
+  assert.equal(existsSync(easPath), true);
+  const easConfig = JSON.parse(readFileSync(easPath, "utf-8"));
+  assert.equal(easConfig.build?.preview?.android?.buildType, "apk");
+  assert.equal(easConfig.build?.development?.developmentClient, true);
+
+  const appPath = resolve("app.json");
+  const appConfig = JSON.parse(readFileSync(appPath, "utf-8"));
+  assert.equal(appConfig.expo?.android?.package, "com.lidemoda.app");
+  assert.equal(appConfig.expo?.android?.versionCode, 1);
+  assert.deepEqual(appConfig.expo?.android?.permissions, ["CAMERA", "RECORD_AUDIO"]);
 });
