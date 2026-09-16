@@ -243,6 +243,7 @@ test("voice assistant heuristic detects catalog registration intent", () => {
   const res2 = interpretarHeuristica("vender 2 Jean Mom Fit");
   assert.equal(res2.accion, "venta");
 });
+test("voice assistant heuristic extracts daily sales query intent and branch correctly", () => {
   const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
 
   const query1 = "¿cuánto se vendió hoy?";
@@ -256,6 +257,73 @@ test("voice assistant heuristic detects catalog registration intent", () => {
   assert.equal(res2.accion, "consulta_ventas");
   assert.equal(res2.consulta?.periodo, "hoy");
   assert.equal(res2.consulta?.sucursal, "comercio");
+});
+
+test("voice SKU normalization repairs dictated codes before matching", () => {
+  const { normalizarCodigoSKU, pareceSKU, matchProduct } = loadTsModule("src/features/asistente-ia/lib/productMatching.ts");
+
+  assert.equal(normalizarCodigoSKU("jea 001"), "jea-001");
+  assert.equal(normalizarCodigoSKU("JEA_guion_001"), "jea-001");
+  assert.equal(pareceSKU("jea 001"), true);
+  assert.equal(pareceSKU("chompa"), false);
+
+  const product = { id: 9, nombre: "Jean Mom Fit", codigo: "JEA-001", categoria: "Pantalones", precio: 185, cantidad: 10 };
+  const dictated = matchProduct([product], "jea 001");
+  assert.equal(dictated.kind, "match");
+  assert.equal(dictated.product.id, 9);
+});
+
+test("voice transcription stabilizer collapses spaces and repairs SKUs", () => {
+  const { estabilizarTranscripcion } = loadTsModule("src/features/asistente-ia/hooks/useVoiceCommand.ts");
+
+  assert.equal(estabilizarTranscripcion("  vender   2  jea 001  "), "vender 2 jea-001");
+  assert.equal(estabilizarTranscripcion("stock de  chompa   roja"), "stock de chompa roja");
+});
+
+test("chat sessions live short: complete locks history and auto-cancels on new", () => {
+  const { chatReducer, chatInicial, objetivoDeResultado } = loadTsModule("src/features/asistente-ia/lib/chatSession.ts");
+
+  assert.equal(objetivoDeResultado("venta"), "venta");
+  assert.equal(objetivoDeResultado("consulta_stock"), "consulta");
+  assert.equal(objetivoDeResultado("registro_producto"), "registro");
+  assert.equal(objetivoDeResultado("desambiguacion"), "indefinido");
+
+  const sesion = { id: "s1", objetivo: "venta", estado: "activa", resumen: null, createdAt: 1, updatedAt: 1 };
+  let state = chatReducer(chatInicial, { type: "nueva-sesion", session: sesion });
+  assert.equal(state.activeSessionId, "s1");
+
+  state = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "s1",
+    message: { id: "m1", role: "usuario", texto: "vender 2 chompas" },
+    updatedAt: 2,
+  });
+  assert.equal(state.messages.s1.length, 1);
+
+  state = chatReducer(state, { type: "completar-sesion", sessionId: "s1", resumen: "Venta 2× Chompa", updatedAt: 3 });
+  assert.equal(state.sessions[0].estado, "completada");
+  assert.equal(state.activeSessionId, null);
+
+  // Completed sessions are read-only.
+  const frozen = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "s1",
+    message: { id: "m2", role: "usuario", texto: "sino 5" },
+    updatedAt: 4,
+  });
+  assert.equal(frozen.messages.s1.length, 1);
+
+  // A new session auto-cancels a still-active one.
+  let active = chatReducer(chatInicial, {
+    type: "nueva-sesion",
+    session: { id: "a", objetivo: "indefinido", estado: "activa", resumen: null, createdAt: 1, updatedAt: 1 },
+  });
+  active = chatReducer(active, {
+    type: "nueva-sesion",
+    session: { id: "b", objetivo: "indefinido", estado: "activa", resumen: null, createdAt: 2, updatedAt: 2 },
+  });
+  assert.equal(active.sessions.find((s) => s.id === "a").estado, "cancelada");
+  assert.equal(active.activeSessionId, "b");
 });
 
 test("mobile build configuration contains valid EAS preview profile and Android package", () => {

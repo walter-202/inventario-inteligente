@@ -60,7 +60,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="escanear" options={{ presentation: "modal" }} />
         <Stack.Screen name="registrar-producto" options={{ presentation: "modal" }} />
-        <Stack.Screen name="registro-voz" options={{ presentation: "modal" }} />
+        <Stack.Screen name="registro-voz" />
         <Stack.Screen name="movimientos" />
         <Stack.Screen name="nueva-venta" />
         <Stack.Screen name="ajustes-ia" />

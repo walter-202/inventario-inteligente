@@ -9,6 +9,27 @@ function normalize(value: string) {
   return value.trim().toLowerCase();
 }
 
+/**
+ * Normaliza códigos dictados por voz: el STT suele devolver "jea 001",
+ * "gea-001" o "jea guion 001" en lugar de "JEA-001".
+ */
+export function normalizarCodigoSKU(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/\b(guion|guión|dash|menos)\b/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** ¿Parece un SKU/código (letras+números) y no una palabra suelta? */
+export function pareceSKU(value: string): boolean {
+  const normalized = normalizarCodigoSKU(value);
+  return /[a-z]/.test(normalized) && /\d/.test(normalized) && normalized.length >= 3 && /^[a-z0-9-]+$/.test(normalized);
+}
+
 function uniqueProducts(products: Producto[]) {
   return Array.from(new Map(products.map((product) => [product.id, product])).values());
 }
@@ -23,6 +44,11 @@ export function matchProduct(products: Producto[], text: string): ProductMatch {
   if (!normalized) return { kind: "none" };
 
   const candidates = uniqueProducts(products);
+  const normalizedCode = normalizarCodigoSKU(normalized);
+  const byNormalizedCode = candidates.filter((product) => normalizarCodigoSKU(product.codigo) === normalizedCode);
+  if (byNormalizedCode.length === 1) return { kind: "match", product: byNormalizedCode[0] };
+  if (byNormalizedCode.length > 1) return { kind: "ambiguous", products: byNormalizedCode };
+
   const exactCode = candidates.filter((product) => normalize(product.codigo) === normalized);
   if (exactCode.length === 1) return { kind: "match", product: exactCode[0] };
   if (exactCode.length > 1) return { kind: "ambiguous", products: exactCode };

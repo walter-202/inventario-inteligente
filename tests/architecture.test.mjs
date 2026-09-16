@@ -15,7 +15,12 @@ test("feature-driven structure contains requested slices", () => {
     "src/features/productos/components/BarcodeScannerView.tsx",
     "src/features/inventario/components/TransferModal.tsx",
     "src/features/ventas/components/SaleSummaryModal.tsx",
-    "src/features/asistente-ia/components/RegistroVozDrawer.tsx",
+    "src/features/asistente-ia/components/ChatComposer.tsx",
+    "src/features/asistente-ia/components/ChatMessageBubble.tsx",
+    "src/features/asistente-ia/components/CandidatePicker.tsx",
+    "src/features/asistente-ia/components/SaleConfirmationCard.tsx",
+    "src/features/asistente-ia/components/SessionBar.tsx",
+    "src/features/asistente-ia/lib/chatSession.ts",
     "src/shared/components/AppHeader.tsx",
   ];
   for (const path of expected) assert.equal(existsSync(file(path)), true, path);
