@@ -104,6 +104,25 @@ function assertDashboard(metrics, label) {
   metrics.lowStock.forEach((item, index) => assertFiniteNumber(item.threshold, `${label}.lowStock[${index}].threshold`));
 }
 
+function classifyPublicKey(key) {
+  const normalized = key.trim();
+  const lowered = normalized.toLowerCase();
+  assert(!lowered.includes("service_role") && !lowered.includes("secret"), "Supabase key must not be a service_role or secret key");
+
+  if (normalized.startsWith("sb_publishable_")) return "publishable";
+
+  const parts = normalized.split(".");
+  assert(parts.length === 3, "Supabase key must be an anon JWT or an sb_publishable key");
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    fail("Supabase JWT payload is not valid JSON");
+  }
+  assert(isObject(payload) && payload.role === "anon", "Supabase JWT must carry the anon role");
+  return "anon-jwt";
+}
+
 function validateEndpoint() {
   const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -118,10 +137,11 @@ function validateEndpoint() {
   assert(endpoint.protocol === "https:", "Supabase URL must use HTTPS");
   assert(endpoint.hostname === EXPECTED_PROJECT_HOST, "Supabase URL points to an unexpected project hostname");
   assert(endpoint.pathname === "/" && endpoint.search === "" && endpoint.hash === "", "Supabase URL must be the project origin");
+  return classifyPublicKey(anonKey);
 }
 
 async function main() {
-  validateEndpoint();
+  const authKeyType = validateEndpoint();
 
   // Only read-only frontend API modules are loaded. Mutation modules/functions are intentionally not imported.
   const { obtenerSucursales } = loadTsModule("src/shared/api/sucursalesApi.ts");
@@ -211,7 +231,7 @@ async function main() {
       branchLowStockCount: branchDashboard.lowStock.length,
     },
     sales: { globalRows: globalSales.length, selectedBranchRows: branchSales.length },
-    contracts: { branches: true, catalog: true, inventory: true, dashboard: true, sales: true },
+    contracts: { authKeyType, branches: true, catalog: true, inventory: true, dashboard: true, sales: true },
   }));
 }
 

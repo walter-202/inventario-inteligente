@@ -1,9 +1,5 @@
--- Explicit deployment SQL, not a generated migration.
--- The Supabase CLI is unavailable in this workspace, so do not invent a
--- migration timestamp/name. Pass these statements to apply_migration (whose
--- transaction wrapper owns atomicity) or run them as one SQL-editor batch.
--- Only the SECURITY DEFINER search_path setting is changed; signatures,
--- bodies, grants, and function behavior remain untouched.
+-- Incremental migration for the existing manually provisioned Supabase database.
+-- This is not a fresh-project bootstrap; it only hardens the five existing RPCs.
 
 ALTER FUNCTION public.registrar_producto_con_stock(text, text, text, numeric, integer, bigint)
   SET search_path = '';
