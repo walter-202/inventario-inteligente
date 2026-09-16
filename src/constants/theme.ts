@@ -1,65 +1,137 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+export const colors = {
+  // Primario: #2563EB (Royal Electric Blue)
+  primary: "#2563EB",
+  primaryDark: "#1D4ED8",
+  primarySoft: "#EFF6FF",
+  primaryBorder: "#DBEAFE",
 
-import '@/global.css';
+  // Secundario: #6366F1 (Indigo / Blurple)
+  secondary: "#6366F1",
+  secondaryDark: "#4F46E5",
+  secondarySoft: "#EEF2FF",
 
-import { Platform } from 'react-native';
+  // Terciario: #06B6D4 (Cyan / Teal)
+  tertiary: "#06B6D4",
+  tertiaryDark: "#0891B2",
+  tertiarySoft: "#ECFEFF",
 
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+  // Neutros / Superficies
+  neutral: "#0F172A",
+  neutralDark: "#0B1120",
+  textPrimary: "#0F172A",
+  textSecondary: "#475569",
+  textMuted: "#64748B",
+  background: "#F8FAFC",
+  surface: "#FFFFFF",
+  surfaceSecondary: "#F1F5F9",
+  border: "#E2E8F0",
+  borderLight: "#F1F5F9",
+  white: "#FFFFFF",
+  black: "#000000",
+
+  // Semánticos / Estados
+  danger: "#DC2626",
+  dangerSoft: "#FEE2E2",
+  warning: "#D97706",
+  warningSoft: "#FEF3C7",
+  success: "#10B981",
+  successSoft: "#D1FAE5",
+  info: "#2563EB",
+  infoSoft: "#DBEAFE",
+};
+
+export const typography = {
+  fontFamily: {
+    heading: "System", // Hanken Grotesk fallback
+    body: "System",
+    mono: "monospace", // JetBrains Mono fallback
   },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+  sizes: {
+    hero: 32,
+    title: 24,
+    heading: 18,
+    subheading: 16,
+    body: 14,
+    caption: 12,
+    micro: 10,
   },
-} as const;
-
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
-
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+  weights: {
+    regular: "400" as const,
+    medium: "500" as const,
+    semibold: "600" as const,
+    bold: "700" as const,
+    heavy: "800" as const,
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
+};
 
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
-} as const;
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+};
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+import { MD3LightTheme } from "react-native-paper";
+
+export const paperTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: colors.primary,
+    primaryContainer: colors.primarySoft,
+    secondary: colors.secondary,
+    secondaryContainer: colors.secondarySoft,
+    tertiary: colors.tertiary,
+    tertiaryContainer: colors.tertiarySoft,
+    background: colors.background,
+    surface: colors.surface,
+    error: colors.danger,
+    errorContainer: colors.dangerSoft,
+    outline: colors.border,
+  },
+};
+
+export const radius = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  pill: 9999,
+};
+
+export const shadows = {
+  subtle: {
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  card: {
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  floating: {
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+};
+
+export const theme = {
+  colors,
+  typography,
+  spacing,
+  radius,
+  shadows,
+  paperTheme,
+};

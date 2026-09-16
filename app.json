@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "Lidemoda",
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -26,11 +26,24 @@
     "plugins": [
       "expo-router",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Permitir a Lidemoda utilizar la cámara para escanear productos."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Permitir a Lidemoda utilizar el micrófono para registrar operaciones por voz.",
+          "speechRecognitionPermission": "Permitir a Lidemoda reconocer tu voz para registrar operaciones."
         }
       ]
     ],
