@@ -172,3 +172,46 @@ test("sale submission boundary keeps a reentrant second sale locked after async 
   lock.release();
   assert.equal(lock.locked, false);
 });
+
+test("secure key store saves and retrieves provider keys in fallback memory store", async () => {
+  const { setApiKey, getApiKey, deleteApiKey, setPreferredMode, getPreferredMode, setCustomModel, getCustomModel } = loadTsModule("src/shared/lib/secureKeyStore.ts");
+
+  await setApiKey("groq", "gsk_test_12345");
+  assert.equal(await getApiKey("groq"), "gsk_test_12345");
+
+  await setCustomModel("groq", "llama-3.1-8b-instant");
+  assert.equal(await getCustomModel("groq"), "llama-3.1-8b-instant");
+
+  await setPreferredMode("cerebras");
+  assert.equal(await getPreferredMode(), "cerebras");
+
+  await deleteApiKey("groq");
+  assert.equal(await getApiKey("groq"), null);
+});
+
+test("AI gateway gracefully falls back to heuristic when no API keys are present", async () => {
+  const { completeChatJSON } = loadTsModule("src/features/asistente-ia/lib/aiGateway.ts");
+  const { z } = loadTsModule("node_modules/zod/index.js");
+
+  const schema = z.object({ test: z.string() });
+  const result = await completeChatJSON({
+    systemPrompt: "Test prompt",
+    userMessage: "Test user message",
+    schema,
+  });
+
+  assert.equal(result.provider, "heuristic");
+  assert.equal(result.data, null);
+});
+
+test("voice registration service extracts fields via heuristic when gateway falls back", async () => {
+  const { interpretarRegistroProducto } = loadTsModule("src/features/asistente-ia/api/voiceRegistrationService.ts");
+
+  const phrase = "registrar blusa de seda roja código BLU-100 precio 150 cantidad 25 categoría Blusas";
+  const result = await interpretarRegistroProducto(phrase);
+
+  assert.equal(result.codigo, "BLU-100");
+  assert.equal(result.precio, 150);
+  assert.equal(result.cantidad, 25);
+  assert.equal(result.categoria, "Blusas");
+});

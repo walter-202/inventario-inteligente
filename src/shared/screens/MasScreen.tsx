@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { Mic } from "lucide-react-native";
+import { Mic, Sparkles } from "lucide-react-native";
 import { Link } from "expo-router";
 import { Button, Card, Text } from "react-native-paper";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -19,6 +19,11 @@ export function MasScreen() {
           <Link href="/registro-voz" asChild>
             <Button mode="outlined" icon={() => <Mic size={18} />}>
               Registrar por voz
+            </Button>
+          </Link>
+          <Link href="/ajustes-ia" asChild>
+            <Button mode="outlined" icon={() => <Sparkles size={18} />}>
+              Configuración de IA (API Keys & Modelos)
             </Button>
           </Link>
         </Card.Content>

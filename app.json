@@ -45,7 +45,8 @@
           "microphonePermission": "Permitir a Lidemoda utilizar el micrófono para registrar operaciones por voz.",
           "speechRecognitionPermission": "Permitir a Lidemoda reconocer tu voz para registrar operaciones."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

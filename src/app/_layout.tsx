@@ -17,6 +17,7 @@ export default function RootLayout() {
             <Stack.Screen name="registro-voz" options={{ presentation: "modal" }} />
             <Stack.Screen name="movimientos" />
             <Stack.Screen name="nueva-venta" />
+            <Stack.Screen name="ajustes-ia" />
           </Stack>
         </PaperProvider>
       </QueryClientProvider>
