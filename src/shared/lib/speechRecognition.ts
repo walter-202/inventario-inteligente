@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   ExpoSpeechRecognitionErrorEvent,
   ExpoSpeechRecognitionNativeEventMap,
@@ -15,6 +15,10 @@ import type {
  * Este helper carga el módulo con `require` dentro de try/catch,
  * así las rutas que usan voz siguen funcionando en Expo Go en
  * modo degradado (dictado desactivado, interpretación por texto activa).
+ *
+ * Política de error: no se previene, se intenta. La ausencia solo se
+ * informa cuando un intento real de dictar falla (en web el micrófono
+ * sí funciona vía Web Speech y el `require` síncrono no lo ve).
  */
 
 type SpeechModule = typeof import("expo-speech-recognition");
@@ -45,12 +49,39 @@ export function isSpeechRecognitionAvailable(): boolean {
   return getSpeechRecognitionModule() !== null;
 }
 
+let asyncCache: Promise<SpeechModule | null> | undefined;
+
+/**
+ * Intento real de carga: primero la vía síncrona (dev builds) y si no hay
+ * nada, un `import` dinámico (en web el bundler resuelve la implementación
+ * Web Speech). Solo devuelve null cuando AMBOS fallan, es decir, cuando ya
+ * se puede informar con certeza que no hay dictado.
+ */
+export function loadSpeechRecognitionAsync(): Promise<SpeechModule | null> {
+  const sync = getSpeechRecognition();
+  if (sync) return Promise.resolve(sync);
+  if (!asyncCache) {
+    asyncCache = (async () => {
+      try {
+        const mod = (await import("expo-speech-recognition")) as SpeechModule | undefined;
+        if (!mod?.ExpoSpeechRecognitionModule) return null;
+        cached = mod;
+        return mod;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return asyncCache;
+}
+
 export type { ExpoSpeechRecognitionErrorEvent, ExpoSpeechRecognitionResultEvent };
 
 /**
  * Sustituto seguro de `useSpeechRecognitionEvent`. Si el módulo
  * nativo no existe (Expo Go) no suscribe nada en lugar de crashear.
- * Mantiene el orden de hooks estable: siempre llama a useEffect.
+ * Si el módulo aparece tarde (import dinámico en web), se suscribe
+ * cuando llega. Mantiene el orden de hooks estable.
  */
 export function useSpeechRecognitionEventSafe<E extends keyof ExpoSpeechRecognitionNativeEventMap>(
   eventName: E,
@@ -58,7 +89,18 @@ export function useSpeechRecognitionEventSafe<E extends keyof ExpoSpeechRecognit
 ): void {
   const listenerRef = useRef(listener);
   listenerRef.current = listener;
-  const speech = getSpeechRecognition();
+  const [speech, setSpeech] = useState<SpeechModule | null>(() => getSpeechRecognition());
+
+  useEffect(() => {
+    if (speech) return;
+    let alive = true;
+    void loadSpeechRecognitionAsync().then((loaded) => {
+      if (alive && loaded) setSpeech(loaded);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [speech]);
 
   useEffect(() => {
     const native = speech?.ExpoSpeechRecognitionModule as

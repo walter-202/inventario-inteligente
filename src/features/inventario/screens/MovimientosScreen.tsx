@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
-import { ArrowRightLeft, Check, Search, Store, X } from "lucide-react-native";
-import { ActivityIndicator, Button, Card, Chip, HelperText, Searchbar, SegmentedButtons, Text, TextInput } from "react-native-paper";
+import { ArrowRightLeft, Search, X } from "lucide-react-native";
+import { ActivityIndicator, Button, Card, HelperText, Searchbar, SegmentedButtons, Text, TextInput } from "react-native-paper";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
+import { BranchSelect } from "../../../shared/components/BranchSelect";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { colors, spacing } from "../../../shared/theme";
 import { extraerMensajeError } from "../../../shared/lib/utils";
-import { formatBranchName } from "../../../shared/lib/branchNames";
 import type { Producto } from "../../../shared/types/domain";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useProductos } from "../../productos/hooks/useProductos";
@@ -43,6 +44,7 @@ function MovimientosForm() {
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [transferVisible, setTransferVisible] = useState(false);
+  const { requestConfirm, dialog } = useConfirm();
   useEffect(() => { const timer = setTimeout(() => setDeferredSearch(search), 300); return () => clearTimeout(timer); }, [search]);
   useEffect(() => { if (!canChangeBranch && activeBranchId !== null) setBranchId(activeBranchId); else if (branchId === null && branches.data?.length) setBranchId(branches.data[0].id); if (destinationId === null && branches.data?.length && branches.data.length > 1) setDestinationId(branches.data[1].id); }, [activeBranchId, branches.data, branchId, canChangeBranch, destinationId]);
   const products = useProductos({ q: deferredSearch || undefined });
@@ -53,11 +55,18 @@ function MovimientosForm() {
 
   const chooseType = (value: string) => { setType(value as MovementType); setFormError(null); setQuantity("1"); setNote(""); };
   const chooseProduct = (value: Producto) => { setProduct(value); setSearch(""); setDeferredSearch(""); setFormError(null); };
-  const submit = () => {
+  const submit = async () => {
     if (!product || branchId === null) { setFormError("Seleccioná una sucursal y un producto."); return; }
     const parsed = MovimientoSucursalSchema.safeParse({ producto_id: product.id, sucursal_id: branchId, cantidad: Number(quantity), observacion: note });
     if (!parsed.success) { setFormError(parsed.error.issues[0]?.message ?? "Revisá los datos."); return; }
     if (type === "salida" && parsed.data.cantidad > (inventoryItem?.cantidad ?? 0)) { setFormError(`Stock insuficiente. Disponible: ${inventoryItem?.cantidad ?? 0}.`); return; }
+    const ok = await requestConfirm({
+      title: `Confirmar ${type}`,
+      message: `Se registra una ${type} de ${parsed.data.cantidad} × ${product.nombre} (${product.codigo}) en ${selectedBranchName}. El stock cambia de inmediato.`,
+      confirmLabel: type === "entrada" ? "Registrar entrada" : "Registrar salida",
+      danger: false,
+    });
+    if (!ok) return;
     setFormError(null);
     const input = type === "entrada" ? { tipo: "entrada" as const, params: parsed.data } : { tipo: "salida" as const, params: parsed.data };
     movement.mutate(input, { onSuccess: () => { Alert.alert("Movimiento registrado", "La operación se registró correctamente."); setProduct(null); setQuantity("1"); setNote(""); }, onError: (error) => setFormError(extraerMensajeError(error, "No se pudo registrar el movimiento.")) });
@@ -65,6 +74,7 @@ function MovimientosForm() {
   const selectedTransferItem: InventarioItem | null = inventoryItem ?? (product && branchId !== null ? { id: -1, producto_id: product.id, sucursal_id: branchId, cantidad: 0, producto: product, sucursal: { id: branchId, nombre: selectedBranchName } } : null);
   return (
     <ScreenContainer>
+      {dialog}
       <View style={styles.screen}>
         <ScrollView
           style={styles.scroll}
@@ -84,59 +94,22 @@ function MovimientosForm() {
         <Text variant="labelLarge" style={styles.label}>
           {type === "transferencia" ? "Sucursal de origen" : "Sucursal"}
         </Text>
-        <View style={styles.chips}>
-          {originBranches.map((branch) => {
-            const isSelected = branch.id === branchId;
-            return (
-              <Chip
-                key={branch.id}
-                compact
-                selected={isSelected}
-                showSelectedCheck={false}
-                icon={() =>
-                  isSelected ? (
-                    <Check size={16} color={colors.primary} />
-                  ) : (
-                    <Store size={14} color={colors.textSecondary} />
-                  )
-                }
-                onPress={() => setBranchId(branch.id)}
-                style={[styles.branchChip, isSelected && styles.branchChipSelected]}
-                textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
-              >
-                {formatBranchName(branch.nombre)}
-              </Chip>
-            );
-          })}
-        </View>
+        <BranchSelect
+          label={type === "transferencia" ? "Sucursal de origen" : "Sucursal"}
+          branches={originBranches}
+          value={branchId}
+          onChange={(id) => { if (id !== undefined) setBranchId(id); }}
+        />
         {type === "transferencia" ? (
           <>
             <Text variant="labelLarge" style={styles.label}>Sucursal de destino</Text>
-            <View style={styles.chips}>
-              {(branches.data ?? []).filter((branch) => branch.id !== branchId).map((branch) => {
-                const isSelected = branch.id === destinationId;
-                return (
-                  <Chip
-                    key={branch.id}
-                    compact
-                    selected={isSelected}
-                    showSelectedCheck={false}
-                    icon={() =>
-                      isSelected ? (
-                        <Check size={16} color={colors.primary} />
-                      ) : (
-                        <Store size={14} color={colors.textSecondary} />
-                      )
-                    }
-                    onPress={() => setDestinationId(branch.id)}
-                    style={[styles.branchChip, isSelected && styles.branchChipSelected]}
-                    textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
-                  >
-                    {formatBranchName(branch.nombre)}
-                  </Chip>
-                );
-              })}
-            </View>
+            <BranchSelect
+              label="Sucursal de destino"
+              branches={branches.data ?? []}
+              value={destinationId}
+              onChange={(id) => setDestinationId(id ?? null)}
+              excludeId={branchId}
+            />
           </>
         ) : null}
         <Text variant="labelLarge" style={styles.label}>Producto</Text>
@@ -253,4 +226,4 @@ function MovimientosForm() {
   );
 }
 
-const styles = StyleSheet.create({ screen: { flex: 1 }, scroll: { flex: 1 }, content: { padding: spacing.md, paddingBottom: spacing.md, gap: spacing.sm }, footer: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border }, submitButton: { borderRadius: 14 }, submitButtonContent: { height: 52 }, label: { marginTop: spacing.xs, fontWeight: "700", color: colors.textPrimary }, chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 }, branchChip: { backgroundColor: "#F8FAFC", borderColor: "#E2E8F0", borderWidth: 1, borderRadius: 10 }, branchChipSelected: { backgroundColor: colors.primarySoft, borderColor: colors.primary, borderWidth: 1.5 }, branchChipText: { color: colors.textPrimary, fontSize: 12 }, branchChipTextSelected: { color: colors.primary, fontWeight: "700", fontSize: 12 }, selected: { flexDirection: "row", alignItems: "center", gap: spacing.md }, selectedCopy: { flex: 1, gap: 2 }, muted: { color: colors.textSecondary }, result: { marginTop: spacing.sm }, loader: { paddingVertical: spacing.md }, field: { marginTop: spacing.xs } });
+const styles = StyleSheet.create({ screen: { flex: 1 }, scroll: { flex: 1 }, content: { padding: spacing.md, paddingBottom: spacing.md, gap: spacing.sm }, footer: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border }, submitButton: { borderRadius: 14 }, submitButtonContent: { height: 52 }, label: { marginTop: spacing.xs, fontWeight: "700", color: colors.textPrimary }, selected: { flexDirection: "row", alignItems: "center", gap: spacing.md }, selectedCopy: { flex: 1, gap: 2 }, muted: { color: colors.textSecondary }, result: { marginTop: spacing.sm }, loader: { paddingVertical: spacing.md }, field: { marginTop: spacing.xs } });

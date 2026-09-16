@@ -1,8 +1,13 @@
-import { useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { router } from "expo-router";
-import { ActivityIndicator, Button, Chip, Text } from "react-native-paper";
+import { router, useFocusEffect } from "expo-router";
+import { ActivityIndicator, Button, IconButton, Snackbar, Text } from "react-native-paper";
+import { Menu, Plus } from "lucide-react-native";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
+import { BranchSelect } from "../../../shared/components/BranchSelect";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
+import { useAuth } from "../../auth/hooks/useAuth";
+import { getPreferredMode, setPreferredMode, type PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { colors, spacing } from "../../../shared/theme";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
@@ -28,6 +33,8 @@ import { CandidatePicker } from "../components/CandidatePicker";
 import { SaleConfirmationCard, type VentaConfirmationLine } from "../components/SaleConfirmationCard";
 import { ChatComposer } from "../components/ChatComposer";
 import { SessionBar } from "../components/SessionBar";
+import { SessionDrawer } from "../components/SessionDrawer";
+import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
 
 const RETRY_HINT = "Corregí el texto abajo y enviá de nuevo.";
 const SUGERENCIA_SKU = 'Probá con el código SKU (ej: JEAN-001) o "Vender 2 Jean Mom Fit".';
@@ -41,14 +48,36 @@ type LineaConStock = LineaInterpretada & { available: number };
  */
 export function VoiceCommandView() {
   const voice = useVoiceCommand();
+  const { profile } = useAuth();
   const branches = useSucursales();
   const stock = useStockMultiSucursal();
   const sale = useProcesarVenta();
+  const { requestConfirm, dialog: confirmDialog } = useConfirm();
+  const [mode, setMode] = useState<PreferredMode>("auto");
+  const cargarModo = useCallback(() => {
+    void getPreferredMode().then(setMode).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    cargarModo();
+  }, [cargarModo]);
+  useFocusEffect(
+    useCallback(() => {
+      cargarModo();
+    }, [cargarModo]),
+  );
+  const cambiarModo = (next: PreferredMode) => {
+    setMode(next);
+    void setPreferredMode(next).catch(() => undefined);
+  };
+  const primerNombre = (profile?.nombre ?? profile?.email ?? "").split(" ")[0];
   const [chat, dispatch] = useReducer(chatReducer, chatInicial);
   const [inspectingId, setInspectingId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
   const [branchId, setBranchId] = useState<number | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<VentaConfirmationLine[] | null>(null);
   const [shortage, setShortage] = useState<{ messageId: string; lines: LineaConStock[] } | null>(null);
+  const [papelera, setPapelera] = useState<{ session: ChatSession; messages: ChatMessage[] } | null>(null);
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
   const idRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
@@ -213,6 +242,7 @@ export function VoiceCommandView() {
   const enviar = async () => {
     const texto = voice.transcript.trim();
     if (!texto || voice.interpreting || sale.isPending) return;
+    if (voice.recording) voice.stop();
     setInspectingId(null);
     const sessionId = asegurarSesion();
     agregar(sessionId, { role: "usuario", texto });
@@ -325,6 +355,7 @@ export function VoiceCommandView() {
     setInspectingId(null);
     setPendingConfirmation(null);
     setShortage(null);
+    setDrawerOpen(false);
     const session: ChatSession = {
       id: nextId("sesion"),
       objetivo: "indefinido",
@@ -334,6 +365,51 @@ export function VoiceCommandView() {
       updatedAt: ahora(),
     };
     dispatch({ type: "nueva-sesion", session });
+  };
+
+  const seleccionarSesion = (sessionId: string) => {
+    const session = chat.sessions.find((item) => item.id === sessionId);
+    setDrawerOpen(false);
+    if (!session) return;
+    if (session.estado === "completada") {
+      setInspectingId(sessionId);
+      return;
+    }
+    setInspectingId(null);
+    dispatch({ type: "reanudar-sesion", sessionId, updatedAt: ahora() });
+  };
+
+  const eliminarSesion = async (sessionId: string) => {
+    const session = chat.sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    const ok = await requestConfirm({
+      title: "Borrar chat",
+      message: `Se borra "${session?.resumen ?? "este chat"}" con todo su historial. Esta acción no se puede deshacer.`,
+      confirmLabel: "Borrar",
+    });
+    if (!ok) return;
+    setPapelera({ session, messages: chat.messages[sessionId] ?? [] });
+    if (inspectingId === sessionId) setInspectingId(null);
+    if (pendingConfirmation && chat.activeSessionId === sessionId) setPendingConfirmation(null);
+    dispatch({ type: "eliminar-sesion", sessionId });
+  };
+
+  const deshacerBorrado = () => {
+    if (!papelera) return;
+    dispatch({ type: "restaurar-sesion", session: papelera.session, messages: papelera.messages });
+    setPapelera(null);
+  };
+
+  const abrirModoVoz = () => {
+    setVoiceMode(true);
+    if (!voice.transcript.trim() && voice.isAvailable && voice.permission?.granted && !voice.recording) {
+      voice.start();
+    }
+  };
+
+  const enviarDesdeVoz = () => {
+    setVoiceMode(false);
+    void enviar();
   };
 
   if (voice.permissionLoading || branches.isLoading || stock.isLoading) {
@@ -347,39 +423,35 @@ export function VoiceCommandView() {
   const visibleSessionId = inspectingId ?? chat.activeSessionId;
   const visibleMessages = visibleSessionId ? (chat.messages[visibleSessionId] ?? []) : [];
   const visibleSession = chat.sessions.find((session) => session.id === visibleSessionId) ?? null;
+  const activeSession = chat.sessions.find((session) => session.id === chat.activeSessionId) ?? null;
 
   return (
     <ScreenContainer>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Text variant="titleLarge">Asistente Lidemoda</Text>
-          <Button compact mode="text" onPress={() => router.back()}>
-            Volver
-          </Button>
+          <View style={styles.headerLeft}>
+            <IconButton icon={() => <Menu size={22} />} onPress={() => setDrawerOpen(true)} accessibilityLabel="Abrir historial de chats" />
+            <Text variant="titleLarge" style={styles.greeting}>
+              Hola{primerNombre ? `, ${primerNombre}` : ""}!
+            </Text>
+          </View>
+          <View style={styles.headerRight}>
+            <IconButton icon={() => <Plus size={22} />} onPress={nuevaSesion} accessibilityLabel="Nuevo chat" />
+            <Button compact mode="text" onPress={() => router.back()}>
+              Volver
+            </Button>
+          </View>
         </View>
         <Text variant="bodySmall" style={styles.branch}>
           Sucursal activa: {branchName || "Sin sucursal"}
         </Text>
-        <View style={styles.chips}>
-          {(branches.data ?? []).map((branch) => (
-            <Chip
-              key={branch.id}
-              compact
-              selected={branch.id === activeBranch}
-              showSelectedCheck={false}
-              onPress={() => setBranchId(branch.id)}
-            >
-              {branch.nombre}
-            </Chip>
-          ))}
-        </View>
-        <SessionBar
-          sessions={chat.sessions}
-          activeSessionId={chat.activeSessionId}
-          inspectingId={inspectingId}
-          onNew={nuevaSesion}
-          onInspect={setInspectingId}
+        <BranchSelect
+          label="Sucursal"
+          branches={branches.data ?? []}
+          value={activeBranch}
+          onChange={(id) => { if (id !== undefined) setBranchId(id); }}
         />
+        <SessionBar active={activeSession} />
         {inspectingId && visibleSession ? (
           <View style={styles.inspectBar}>
             <Text variant="bodySmall" style={styles.inspectText}>
@@ -464,7 +536,6 @@ export function VoiceCommandView() {
             transcript={voice.transcript}
             recording={voice.recording}
             interpreting={voice.interpreting}
-            isAvailable={voice.isAvailable}
             permissionDenied={voice.isAvailable && voice.permission?.granted !== true}
             permissionError={voice.permissionError}
             error={voice.error}
@@ -472,9 +543,37 @@ export function VoiceCommandView() {
             onStart={voice.start}
             onStop={voice.stop}
             onSend={() => void enviar()}
+            onVoiceMode={abrirModoVoz}
             onRequestPermission={voice.requestPermission}
           />
         )}
+        <SessionDrawer
+          open={drawerOpen}
+          sessions={chat.sessions}
+          activeSessionId={chat.activeSessionId}
+          mode={mode}
+          onClose={() => setDrawerOpen(false)}
+          onNew={nuevaSesion}
+          onSelect={seleccionarSesion}
+          onDelete={eliminarSesion}
+          onModeChange={cambiarModo}
+        />
+        <VoiceModeOverlay
+          visible={voiceMode}
+          transcript={voice.transcript}
+          recording={voice.recording}
+          interpreting={voice.interpreting}
+          isAvailable={voice.isAvailable}
+          permissionGranted={voice.permission?.granted === true}
+          onToggle={voice.recording ? voice.stop : voice.start}
+          onSend={enviarDesdeVoz}
+          onClose={() => setVoiceMode(false)}
+          onRequestPermission={voice.requestPermission}
+        />
+        {confirmDialog}
+        <Snackbar visible={papelera !== null} onDismiss={() => setPapelera(null)} action={{ label: "Deshacer", onPress: deshacerBorrado }}>
+          Chat borrado.
+        </Snackbar>
       </View>
     </ScreenContainer>
   );
@@ -485,8 +584,10 @@ export default VoiceCommandView;
 const styles = StyleSheet.create({
   screen: { flex: 1, gap: spacing.xs },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.xs, flex: 1 },
+  headerRight: { flexDirection: "row", alignItems: "center" },
+  greeting: { fontWeight: "800", color: colors.textPrimary },
   branch: { color: colors.textSecondary },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   inspectBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -503,7 +604,7 @@ const styles = StyleSheet.create({
   queryCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
     borderRadius: 12,
     padding: spacing.sm,
     gap: 2,
@@ -511,5 +612,5 @@ const styles = StyleSheet.create({
   queryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   queryBranch: { color: colors.textSecondary },
   queryQty: { color: colors.textPrimary, fontWeight: "700" },
-  queryTotal: { color: "#047857", fontWeight: "800" },
+  queryTotal: { color: colors.successDark, fontWeight: "800" },
 });

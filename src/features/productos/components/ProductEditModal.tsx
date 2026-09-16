@@ -3,6 +3,7 @@ import { StyleSheet, View, ScrollView } from "react-native";
 import { Portal, Modal, Button, Text, TextInput, HelperText, Chip } from "react-native-paper";
 import { Tag, Barcode, Layers, DollarSign, CheckCircle2 } from "lucide-react-native";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import type { Producto } from "../../../shared/types/domain";
 import { ActualizarProductoSchema, type ActualizarProductoParams } from "../api/productosApi";
 
@@ -36,6 +37,7 @@ export function ProductEditModal({
   const [categoria, setCategoria] = useState("");
   const [precio, setPrecio] = useState("");
   const [errors, setErrors] = useState<Partial<Record<keyof ActualizarProductoParams, string>>>({});
+  const { requestConfirm, dialog } = useConfirm();
 
   useEffect(() => {
     if (producto) {
@@ -47,7 +49,7 @@ export function ProductEditModal({
     }
   }, [producto, visible]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!producto) return;
     const precioNum = Number(precio.trim().replace(",", "."));
     const validation = ActualizarProductoSchema.safeParse({
@@ -67,6 +69,14 @@ export function ProductEditModal({
       return;
     }
 
+    const ok = await requestConfirm({
+      title: "Guardar cambios",
+      message: `"${validation.data.nombre}" (${validation.data.codigo}) se actualiza para todas las sucursales.`,
+      confirmLabel: "Guardar",
+      danger: false,
+    });
+    if (!ok) return;
+
     setErrors({});
     onSubmit(producto.id, validation.data);
   };
@@ -74,6 +84,7 @@ export function ProductEditModal({
   return (
     <Portal>
       <Modal visible={visible} onDismiss={loading ? undefined : onDismiss} contentContainerStyle={styles.modal}>
+        {dialog}
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <Text variant="titleLarge" style={styles.title}>
             Editar producto

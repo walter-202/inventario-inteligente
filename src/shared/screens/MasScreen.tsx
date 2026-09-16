@@ -4,21 +4,34 @@ import { Link } from "expo-router";
 import { Button, Card, Text } from "react-native-paper";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { AppHeader } from "../components/AppHeader";
+import { useConfirm } from "../components/ConfirmDialog";
 import { spacing } from "../theme";
 import { useAuth } from "../../features/auth/hooks/useAuth";
 import { roleLabels } from "../../features/auth/lib/permissions";
 
 export function MasScreen() {
   const { profile, signOut } = useAuth();
+  const { requestConfirm, dialog } = useConfirm();
+
+  const cerrarSesion = async () => {
+    const ok = await requestConfirm({
+      title: "Cerrar sesión",
+      message: "Vas a salir de tu cuenta en este dispositivo y vas a tener que iniciar sesión de nuevo.",
+      confirmLabel: "Cerrar sesión",
+      danger: false,
+    });
+    if (ok) void signOut();
+  };
 
   return (
     <ScreenContainer scroll>
+      {dialog}
       <AppHeader title="Más" subtitle={profile ? `${profile.nombre ?? profile.email ?? "Cuenta"} · ${roleLabels[profile.rol]}` : "Herramientas de Lidemoda"} />
       <Card mode="outlined">
         <Card.Content style={styles.content}>
           <Text variant="titleMedium">Sesión</Text>
           <Text>{profile?.email ?? "Cuenta autenticada"}</Text>
-          <Button mode="outlined" icon={() => <LogOut size={18} />} onPress={() => void signOut()}>
+          <Button mode="outlined" icon={() => <LogOut size={18} />} onPress={() => void cerrarSesion()}>
             Cerrar sesión
           </Button>
         </Card.Content>

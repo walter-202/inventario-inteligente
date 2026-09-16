@@ -14,6 +14,7 @@ import {
 import { ShieldCheck, Sparkles, KeyRound } from "lucide-react-native";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import {
   deleteApiKey,
   getApiKey,
@@ -36,6 +37,7 @@ import { colors, spacing, radius } from "../../../shared/theme";
 
 export function AISettingsScreen() {
   const [loading, setLoading] = useState(true);
+  const { requestConfirm, dialog: confirmDialog } = useConfirm();
   const [preferredMode, setPreferredModeState] = useState<PreferredMode>("auto");
   const [keys, setKeys] = useState<Record<ProviderId, string | null>>({
     groq: null,
@@ -118,6 +120,14 @@ export function AISettingsScreen() {
   };
 
   const handleDeleteKey = async (providerId: ProviderId) => {
+    const provider = PROVIDER_LIST.find((item) => item.id === providerId);
+    const ok = await requestConfirm({
+      title: `Borrar clave de ${provider?.name ?? providerId}`,
+      message:
+        "Se elimina la clave y el modelo personalizado de este dispositivo. Vas a tener que pegarla de nuevo para usar ese proveedor.",
+      confirmLabel: "Borrar clave",
+    });
+    if (!ok) return;
     await deleteApiKey(providerId);
     await setCustomModel(providerId, null);
     await loadSettings();
@@ -163,6 +173,7 @@ export function AISettingsScreen() {
 
   return (
     <ScreenContainer scroll>
+      {confirmDialog}
       <AppHeader
         title="Configuración de IA"
         subtitle="Proveedores y modelos para ventas y catálogos por voz"

@@ -3,6 +3,7 @@ import { Portal, Modal, Button, HelperText, SegmentedButtons, Text, TextInput } 
 import { StyleSheet, View } from "react-native";
 import { MovimientoTransferenciaSchema } from "../api/inventarioApi";
 import type { InventarioItem, Sucursal } from "../../../shared/types/domain";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { colors, spacing } from "../../../shared/theme";
 
 interface TransferModalProps {
@@ -21,6 +22,7 @@ export function TransferModal({ visible, item, branches, initialDestinationId = 
   const [quantity, setQuantity] = useState("1");
   const [note, setNote] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const { requestConfirm, dialog } = useConfirm();
   useEffect(() => {
     const fallback = branches.find((branch) => branch.id !== item?.sucursal_id)?.id ?? null;
     const selected = initialDestinationId !== null && initialDestinationId !== item?.sucursal_id && branches.some((branch) => branch.id === initialDestinationId)
@@ -31,15 +33,23 @@ export function TransferModal({ visible, item, branches, initialDestinationId = 
     setNote("");
     setValidationError(null);
   }, [item, branches, initialDestinationId]);
-  const submit = () => {
+  const submit = async () => {
     if (!item || destination === null) return;
     const result = MovimientoTransferenciaSchema.safeParse({ producto_id: item.producto_id, sucursal_origen_id: item.sucursal_id, sucursal_destino_id: destination, cantidad: Number(quantity), observacion: note });
     if (!result.success) { setValidationError(result.error.issues[0]?.message ?? "Revisá los datos de la transferencia."); return; }
     if (result.data.cantidad > item.cantidad) { setValidationError(`Stock insuficiente. Disponible: ${item.cantidad}.`); return; }
+    const destinoNombre = branches.find((branch) => branch.id === destination)?.nombre ?? "destino";
+    const ok = await requestConfirm({
+      title: "Confirmar transferencia",
+      message: `Se mueven ${result.data.cantidad} × ${item.producto.nombre} de ${item.sucursal.nombre} a ${destinoNombre}. Revisá que el destino y la cantidad sean correctos.`,
+      confirmLabel: "Transferir",
+      danger: false,
+    });
+    if (!ok) return;
     setValidationError(null);
     onSubmit(result.data);
   };
-  return <Portal><Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}><Text variant="titleLarge">Transferir stock</Text><Text variant="bodyMedium" style={styles.copy}>{item?.producto.nombre ?? "Seleccioná un producto"}</Text><SegmentedButtons value={destination ? String(destination) : ""} onValueChange={(value) => setDestination(Number(value))} buttons={branches.filter((branch) => branch.id !== item?.sucursal_id).map((branch) => ({ value: String(branch.id), label: branch.nombre, showSelectedCheck: false }))} density="small" /><TextInput mode="outlined" label="Cantidad" keyboardType="number-pad" value={quantity} onChangeText={setQuantity} /><TextInput mode="outlined" label="Observación (opcional)" value={note} onChangeText={setNote} maxLength={500} /><HelperText type="error" visible={Boolean(validationError || error)}>{validationError || error}</HelperText><View style={styles.actions}><Button onPress={onDismiss} disabled={loading}>Cancelar</Button><Button mode="contained" onPress={submit} loading={loading} disabled={loading || !item || destination === null}>Transferir</Button></View></Modal></Portal>;
+  return <Portal><Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>{dialog}<Text variant="titleLarge">Transferir stock</Text><Text variant="bodyMedium" style={styles.copy}>{item?.producto.nombre ?? "Seleccioná un producto"}</Text><SegmentedButtons value={destination ? String(destination) : ""} onValueChange={(value) => setDestination(Number(value))} buttons={branches.filter((branch) => branch.id !== item?.sucursal_id).map((branch) => ({ value: String(branch.id), label: branch.nombre, showSelectedCheck: false }))} density="small" /><TextInput mode="outlined" label="Cantidad" keyboardType="number-pad" value={quantity} onChangeText={setQuantity} /><TextInput mode="outlined" label="Observación (opcional)" value={note} onChangeText={setNote} maxLength={500} /><HelperText type="error" visible={Boolean(validationError || error)}>{validationError || error}</HelperText><View style={styles.actions}><Button onPress={onDismiss} disabled={loading}>Cancelar</Button><Button mode="contained" onPress={submit} loading={loading} disabled={loading || !item || destination === null}>Transferir</Button></View></Modal></Portal>;
 }
 
 const styles = StyleSheet.create({ modal: { margin: spacing.lg, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.surface, borderRadius: 16 }, copy: { color: colors.textSecondary }, actions: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm } });

@@ -63,7 +63,10 @@ export type ChatAction =
   | { type: "fijar-objetivo"; sessionId: string; objetivo: ObjetivoSesion; updatedAt: number }
   | { type: "agregar-mensaje"; sessionId: string; message: ChatMessage; updatedAt: number }
   | { type: "completar-sesion"; sessionId: string; resumen: string; updatedAt: number }
-  | { type: "cancelar-sesion"; sessionId: string; updatedAt: number };
+  | { type: "cancelar-sesion"; sessionId: string; updatedAt: number }
+  | { type: "reanudar-sesion"; sessionId: string; updatedAt: number }
+  | { type: "eliminar-sesion"; sessionId: string }
+  | { type: "restaurar-sesion"; session: ChatSession; messages: ChatMessage[] };
 
 export const chatInicial: ChatState = { sessions: [], activeSessionId: null, messages: {} };
 
@@ -133,6 +136,38 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             : item,
         ),
         activeSessionId: state.activeSessionId === action.sessionId ? null : state.activeSessionId,
+      };
+    }
+    case "reanudar-sesion": {
+      const session = state.sessions.find((item) => item.id === action.sessionId);
+      // Solo se reanuda lo no terminado: una completada es historial cerrado.
+      if (!session || session.estado === "completada") return state;
+      return {
+        ...state,
+        sessions: cerrarActiva(state, action.updatedAt).map((item) =>
+          item.id === action.sessionId
+            ? { ...item, estado: "activa" as EstadoSesion, updatedAt: action.updatedAt }
+            : item,
+        ),
+        activeSessionId: action.sessionId,
+      };
+    }
+    case "eliminar-sesion": {
+      if (!state.sessions.some((item) => item.id === action.sessionId)) return state;
+      const { [action.sessionId]: _borrados, ...restMessages } = state.messages;
+      return {
+        sessions: state.sessions.filter((item) => item.id !== action.sessionId),
+        activeSessionId: state.activeSessionId === action.sessionId ? null : state.activeSessionId,
+        messages: restMessages,
+      };
+    }
+    case "restaurar-sesion": {
+      if (state.sessions.some((item) => item.id === action.session.id)) return state;
+      const eraActiva = action.session.estado === "activa";
+      return {
+        sessions: [...state.sessions, action.session],
+        activeSessionId: eraActiva && state.activeSessionId === null ? action.session.id : state.activeSessionId,
+        messages: { ...state.messages, [action.session.id]: action.messages },
       };
     }
   }

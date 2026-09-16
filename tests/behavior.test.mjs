@@ -326,6 +326,76 @@ test("chat sessions live short: complete locks history and auto-cancels on new",
   assert.equal(active.activeSessionId, "b");
 });
 
+test("speech loader informs instead of crashing when the native module is missing", async () => {
+  const { loadSpeechRecognitionAsync, getSpeechRecognitionModule } = loadTsModule("src/shared/lib/speechRecognition.ts");
+
+  const mod = await loadSpeechRecognitionAsync();
+  assert.equal(mod === null || typeof mod.ExpoSpeechRecognitionModule === "object", true);
+  // Sync view stays consistent with the async attempt (null in Node, module on device).
+  assert.equal(getSpeechRecognitionModule() === null, mod === null);
+});
+
+test("chat undo restores a deleted session with its messages", () => {
+  const { chatReducer, chatInicial } = loadTsModule("src/features/asistente-ia/lib/chatSession.ts");
+  const sesion = { id: "u", objetivo: "venta", estado: "activa", resumen: null, createdAt: 1, updatedAt: 1 };
+
+  let state = chatReducer(chatInicial, { type: "nueva-sesion", session: sesion });
+  state = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "u",
+    message: { id: "m1", role: "usuario", texto: "vender 2 chompas" },
+    updatedAt: 2,
+  });
+  const papelera = { session: state.sessions[0], messages: state.messages.u };
+  state = chatReducer(state, { type: "eliminar-sesion", sessionId: "u" });
+  assert.equal(state.sessions.length, 0);
+  assert.equal(state.activeSessionId, null);
+
+  state = chatReducer(state, { type: "restaurar-sesion", session: papelera.session, messages: papelera.messages });
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.sessions[0].estado, "activa");
+  assert.equal(state.activeSessionId, "u");
+  assert.equal(state.messages.u.length, 1);
+
+  // Restoring twice does not duplicate.
+  const once = chatReducer(state, { type: "restaurar-sesion", session: papelera.session, messages: papelera.messages });
+  assert.equal(once.sessions.length, 1);
+});
+
+test("chat drawer can resume cancelled sessions and delete any session", () => {
+  const { chatReducer, chatInicial } = loadTsModule("src/features/asistente-ia/lib/chatSession.ts");
+  const mk = (id, at) => ({ id, objetivo: "venta", estado: "activa", resumen: null, createdAt: at, updatedAt: at });
+
+  let state = chatReducer(chatInicial, { type: "nueva-sesion", session: mk("a", 1) });
+  state = chatReducer(state, { type: "nueva-sesion", session: mk("b", 2) });
+  assert.equal(state.sessions.find((s) => s.id === "a").estado, "cancelada");
+
+  // Resume a cancelled session.
+  state = chatReducer(state, { type: "reanudar-sesion", sessionId: "a", updatedAt: 3 });
+  assert.equal(state.sessions.find((s) => s.id === "a").estado, "activa");
+  assert.equal(state.activeSessionId, "a");
+  assert.equal(state.sessions.find((s) => s.id === "b").estado, "cancelada");
+
+  // Completed sessions cannot resume.
+  state = chatReducer(state, { type: "completar-sesion", sessionId: "a", resumen: "Venta 1× X", updatedAt: 4 });
+  const locked = chatReducer(state, { type: "reanudar-sesion", sessionId: "a", updatedAt: 5 });
+  assert.equal(locked.sessions.find((s) => s.id === "a").estado, "completada");
+  assert.equal(locked.activeSessionId, null);
+
+  // Delete removes session and its messages.
+  const withMsg = chatReducer(chatInicial, { type: "nueva-sesion", session: mk("c", 1) });
+  const filled = chatReducer(withMsg, {
+    type: "agregar-mensaje",
+    sessionId: "c",
+    message: { id: "m1", role: "usuario", texto: "hola" },
+    updatedAt: 2,
+  });
+  const deleted = chatReducer(filled, { type: "eliminar-sesion", sessionId: "c" });
+  assert.equal(deleted.sessions.length, 0);
+  assert.equal(deleted.messages.c, undefined);
+  assert.equal(deleted.activeSessionId, null);
+});
+
 test("mobile build configuration contains valid EAS preview profile and Android package", () => {
   const easPath = resolve("eas.json");
   assert.equal(existsSync(easPath), true);

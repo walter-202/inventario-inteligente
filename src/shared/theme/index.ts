@@ -30,8 +30,24 @@ export const colors = {
   warningSoft: "#FEF3C7",
   success: "#10B981",
   successSoft: "#D1FAE5",
+  successDark: "#047857",
+  /** Acento cálido de mercado (identidad Lidemoda): héroes, análisis y voz. */
+  accent: "#F97316",
+  accentDark: "#C2410C",
+  accentSoft: "#FFEDD5",
+  blush: "#FFF7ED",
+  rosa: "#EC4899",
+  violeta: "#8B5CF6",
   info: "#2563EB",
   infoSoft: "#DBEAFE",
+  backdrop: "rgba(15, 23, 42, 0.45)",
+} as const;
+
+export const gradients = {
+  /** Héroe del panel: naranja mercado → rosa. */
+  sunset: ["#F97316", "#EC4899"] as const,
+  /** Orbe de voz: violeta → rosa → naranja. */
+  orb: ["#8B5CF6", "#EC4899", "#F97316"] as const,
 } as const;
 
 export const typography = {
@@ -74,4 +90,4 @@ export const paperTheme = {
 };
 
 export type AppTheme = typeof paperTheme;
-export const theme = { colors, typography, spacing, radius, shadows, paperTheme };
+export const theme = { colors, gradients, typography, spacing, radius, shadows, paperTheme };

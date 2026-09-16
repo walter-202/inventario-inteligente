@@ -2,15 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import type { PermissionResponse } from "expo-modules-core";
 import {
   getSpeechRecognitionModule,
-  isSpeechRecognitionAvailable,
+  loadSpeechRecognitionAsync,
   useSpeechRecognitionEventSafe,
 } from "../../../shared/lib/speechRecognition";
 import { interpretarVoz, type ResultadoInterpretacion, type VozContexto } from "../api/voiceCommandApi";
 
 type SpeechPermission = PermissionResponse & { restricted?: boolean };
 
+/** Solo se muestra cuando un intento real de dictar falló: informa, no previene. */
 export const VOICE_COMMAND_UNAVAILABLE_MESSAGE =
-  "El dictado por voz requiere un development build. Podés escribir el comando y usar Interpretar.";
+  "No se pudo activar el dictado en este dispositivo (en Expo Go no hay micrófono nativo; en web o development build sí funciona). Podés escribir el comando y enviarlo.";
 
 /** Une espacios y repara SKUs dictados ("jea 001" → "jea-001"). */
 export function estabilizarTranscripcion(valor: string): string {
@@ -40,7 +41,10 @@ function mapearErrorVoz(error?: string, message?: string | null): string {
 }
 
 export function useVoiceCommand() {
-  const [isAvailable] = useState(isSpeechRecognitionAvailable);
+  // Se asume capaz hasta que un intento real falle: en web el micrófono
+  // funciona aunque el `require` síncrono no vea el módulo.
+  const [blocked, setBlocked] = useState(false);
+  const isAvailable = !blocked;
   const [permission, setPermission] = useState<SpeechPermission | null>(null);
   const [permissionLoading, setPermissionLoading] = useState(true);
   const [permissionError, setPermissionError] = useState<string | null>(null);
@@ -76,10 +80,11 @@ export function useVoiceCommand() {
   useSpeechRecognitionEventSafe("error", (event) => { setRecording(false); if (event.error !== "aborted") setError(mapearErrorVoz(event.error, event.message)); });
   useSpeechRecognitionEventSafe("end", () => setRecording(false));
   const requestPermission = useCallback(async () => {
-    const native = getSpeechRecognitionModule();
+    const native = getSpeechRecognitionModule() ?? (await loadSpeechRecognitionAsync())?.ExpoSpeechRecognitionModule ?? null;
     if (!native) {
       setPermission(null);
       setPermissionLoading(false);
+      setBlocked(true);
       setPermissionError(VOICE_COMMAND_UNAVAILABLE_MESSAGE);
       return;
     }
@@ -94,18 +99,32 @@ export function useVoiceCommand() {
       setPermissionLoading(false);
     }
   }, []);
-  const start = useCallback(() => {
-    const native = getSpeechRecognitionModule();
+  const ensureNative = useCallback(async () => {
+    const sync = getSpeechRecognitionModule();
+    if (sync) return sync;
+    return (await loadSpeechRecognitionAsync())?.ExpoSpeechRecognitionModule ?? null;
+  }, []);
+  const start = useCallback(async () => {
+    if (recording) return;
+    setError(null);
+    const native = await ensureNative();
     if (!native) {
+      setBlocked(true);
       setError(VOICE_COMMAND_UNAVAILABLE_MESSAGE);
       return;
     }
-    if (recording) return;
-    if (!permission?.granted) {
+    let granted = permission?.granted === true;
+    try {
+      const current = (await native.getPermissionsAsync()) as SpeechPermission;
+      setPermission(current);
+      granted = current.granted === true;
+    } catch {
+      // Se conserva el último permiso conocido; si no hay, se informa abajo.
+    }
+    if (!granted) {
       setError("Necesitamos permiso del micrófono para iniciar el reconocimiento.");
       return;
     }
-    setError(null);
     setTranscript("");
     setRecording(true);
     try {
@@ -117,8 +136,8 @@ export function useVoiceCommand() {
       setRecording(false);
       setError(startError instanceof Error ? startError.message : "No se pudo iniciar el reconocimiento.");
     }
-  }, [permission, recording]);
+  }, [permission, recording, ensureNative]);
   const stop = useCallback(() => { try { getSpeechRecognitionModule()?.stop(); } catch { /* noop */ } }, []);
   const interpret = useCallback(async (contexto?: VozContexto): Promise<ResultadoInterpretacion> => { setInterpreting(true); setError(null); try { return await interpretarVoz(transcript, contexto); } catch (interpretationError) { const message = interpretationError instanceof Error ? interpretationError.message : "No se pudo interpretar la operación."; setError(message); throw interpretationError; } finally { setInterpreting(false); } }, [transcript]);
-  return { isAvailable, permission, permissionLoading, permissionError, transcript, setTranscript, recording, error, interpreting, requestPermission, start, stop, interpret };
+  return { isAvailable, blocked, permission, permissionLoading, permissionError, transcript, setTranscript, recording, error, interpreting, requestPermission, start, stop, interpret };
 }

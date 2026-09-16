@@ -12,13 +12,12 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
-  Store,
-  Check,
   Lightbulb,
 } from "lucide-react-native";
 import { ProductoInputSchema } from "../api/productosApi";
 import type { NuevoProductoParams, Sucursal } from "../../../shared/types/domain";
-import { formatBranchName } from "../../../shared/lib/branchNames";
+import { BranchSelect } from "../../../shared/components/BranchSelect";
+import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
 import { useVoiceRegistration, type VoiceRegistrationState } from "../hooks/useVoiceRegistration";
 
@@ -167,6 +166,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
 
   const voice = useVoiceRegistration();
   const pulse = usePulse(voice.state === "listening");
+  const { requestConfirm, dialog } = useConfirm();
 
   // Reset form
   useEffect(() => {
@@ -196,7 +196,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
   const update = (field: keyof typeof values, value: string) =>
     setValues((current) => ({ ...current, [field]: value }));
 
-  const submit = () => {
+  const submit = async () => {
     const precioText = values.precio.trim();
     const cantidadText = values.cantidad.trim();
     const precio = Number(precioText.replace(",", "."));
@@ -229,6 +229,13 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
       setErrors(numericErrors);
       return;
     }
+    const ok = await requestConfirm({
+      title: "Confirmar alta",
+      message: `Se crea "${result.data.nombre}" (${result.data.codigo}) en el catálogo con stock inicial ${result.data.cantidad}. No se puede borrar después, solo editar.`,
+      confirmLabel: "Registrar",
+      danger: false,
+    });
+    if (!ok) return;
     setErrors({});
     onSubmit(result.data);
   };
@@ -238,7 +245,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
       voice.stopListening();
       return;
     }
-    // Sin módulo nativo (Expo Go): ofrecer ejemplos de IA en lugar de crashear.
+    // Si el dictado ya falló de verdad en este dispositivo: ejemplos de IA.
     if (!voice.isAvailable) {
       setShowExamples(true);
       return;
@@ -259,6 +266,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      {dialog}
       <Card mode="outlined" style={styles.card}>
         <Card.Content>
           {/* Header with modern AI Voice action */}
@@ -439,40 +447,14 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
             </View>
           </View>
 
-          {/* Sucursal selector (clean badges layout) */}
+          {/* Sucursal selector */}
           <View style={styles.branchSection}>
-            <View style={styles.branchHeaderRow}>
-              <Store size={18} color={colors.textPrimary} />
-              <Text variant="labelLarge" style={styles.branchLabel}>
-                Sucursal de ingreso inicial
-              </Text>
-            </View>
-
-            <View style={styles.branchChipsGrid}>
-              {branches.map((branch) => {
-                const isSelected = branch.id === sucursalId;
-                const shortName = formatBranchName(branch.nombre);
-                return (
-                  <Chip
-                    key={branch.id}
-                    selected={isSelected}
-                    showSelectedCheck={false}
-                    icon={() =>
-                      isSelected ? (
-                        <Check size={16} color={colors.primary} />
-                      ) : (
-                        <Store size={14} color={colors.textSecondary} />
-                      )
-                    }
-                    onPress={() => setSucursalId(branch.id)}
-                    style={[styles.branchChip, isSelected && styles.branchChipSelected]}
-                    textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
-                  >
-                    {shortName}
-                  </Chip>
-                );
-              })}
-            </View>
+            <BranchSelect
+              label="Sucursal de ingreso inicial"
+              branches={branches}
+              value={sucursalId}
+              onChange={(id) => { if (id !== undefined) setSucursalId(id); }}
+            />
             <HelperText type="error" visible={Boolean(errors.sucursal_id)}>{errors.sucursal_id}</HelperText>
           </View>
 
@@ -630,42 +612,6 @@ const styles = StyleSheet.create({
   branchSection: {
     marginTop: spacing.sm,
     marginBottom: spacing.md,
-  },
-  branchHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  branchLabel: {
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  branchChipsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 4,
-  },
-  branchChip: {
-    backgroundColor: "#F8FAFC",
-    borderColor: "#E2E8F0",
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  branchChipSelected: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-    borderWidth: 1.5,
-  },
-  branchChipText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-  },
-  branchChipTextSelected: {
-    color: colors.primary,
-    fontWeight: "700",
-    fontSize: 13,
   },
   submitButton: {
     marginTop: spacing.xs,

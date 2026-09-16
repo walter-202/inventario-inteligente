@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { ScanBarcode, Search, X } from "lucide-react-native";
-import { Button, Card, Chip, HelperText, Searchbar, Text } from "react-native-paper";
+import { Button, Card, HelperText, Searchbar, Snackbar, Text } from "react-native-paper";
 
 import { AppHeader } from "../../../shared/components/AppHeader";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
+import { BranchSelect } from "../../../shared/components/BranchSelect";
 import { extraerMensajeError, formatearPrecio } from "../../../shared/lib/utils";
 import { colors, spacing } from "../../../shared/theme";
 import type { InventarioItem, PaymentMethod, Producto } from "../../../shared/types/domain";
@@ -41,6 +42,7 @@ function VentasContent() {
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [pendingProduct, setPendingProduct] = useState<Producto | null>(null);
   const [pendingStockSnapshot, setPendingStockSnapshot] = useState<InventarioItem[] | null>(null);
+  const [lineaBorrada, setLineaBorrada] = useState<{ item: CartItem; index: number } | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const products = useProductos({ q: deferredSearch || undefined });
   const sales = useVentas(branchId ?? undefined);
@@ -163,7 +165,22 @@ function VentasContent() {
       ),
     );
 
-  const remove = (id: number) => setCart((items) => items.filter((item) => item.producto.id !== id));
+  const remove = (id: number) => {
+    const index = cart.findIndex((item) => item.producto.id === id);
+    if (index === -1) return;
+    setLineaBorrada({ item: cart[index], index });
+    setCart(cart.filter((_, position) => position !== index));
+  };
+
+  const deshacerQuitar = () => {
+    if (!lineaBorrada) return;
+    const { item, index } = lineaBorrada;
+    setCart((items) => {
+      if (items.some((current) => current.producto.id === item.producto.id)) return items;
+      return [...items.slice(0, index), item, ...items.slice(index)];
+    });
+    setLineaBorrada(null);
+  };
   const changeBranch = (id: number) => {
     if (!canChangeBranch && id !== activeBranchId) return;
     setBranchId(id);
@@ -212,13 +229,12 @@ function VentasContent() {
           </View>
         ) : null}
         <Text variant="labelLarge">Sucursal</Text>
-        <View style={styles.chips}>
-          {(branches.data ?? []).filter((branch) => canChangeBranch || branch.id === activeBranchId).map((branch) => (
-            <Chip key={branch.id} selected={branch.id === branchId} onPress={() => changeBranch(branch.id)}>
-              {branch.nombre}
-            </Chip>
-          ))}
-        </View>
+        <BranchSelect
+          label="Sucursal"
+          branches={(branches.data ?? []).filter((branch) => canChangeBranch || branch.id === activeBranchId)}
+          value={selectedBranch}
+          onChange={(id) => { if (id !== undefined) changeBranch(id); }}
+        />
         <View style={styles.actions}>
           <Link href="/escanear" asChild>
             <Button mode="outlined" icon={() => <ScanBarcode size={18} color={colors.primary} />}>
@@ -296,6 +312,9 @@ function VentasContent() {
         onDismiss={() => setSummaryVisible(false)}
         onConfirm={confirm}
       />
+      <Snackbar visible={lineaBorrada !== null} onDismiss={() => setLineaBorrada(null)} action={{ label: "Deshacer", onPress: deshacerQuitar }}>
+        Línea quitada del ticket.
+      </Snackbar>
     </ScreenContainer>
   );
 }
@@ -308,11 +327,6 @@ const styles = StyleSheet.create({
   },
   refreshError: {
     alignItems: "flex-start",
-  },
-  chips: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
   },
   actions: {
     flexDirection: "row",

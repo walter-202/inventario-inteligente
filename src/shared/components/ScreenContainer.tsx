@@ -18,10 +18,24 @@ export function ScreenContainer({ children, scroll = false, contentContainerStyl
       </SafeAreaView>
     );
   }
-  return <SafeAreaView style={[styles.safe, style]} edges={["top"]} {...rest}>{children}</SafeAreaView>;
+  return (
+    <SafeAreaView style={[styles.safe, style]} edges={["top"]} {...rest}>
+      <View style={styles.centered}>{children}</View>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  // Columna centrada con ancho máximo: en teléfono respira con padding,
+  // en tablet/web no se estira a los bordes.
+  content: { width: "100%", maxWidth: 720, alignSelf: "center", padding: spacing.lg, paddingBottom: spacing.xxxl },
+  centered: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
 });

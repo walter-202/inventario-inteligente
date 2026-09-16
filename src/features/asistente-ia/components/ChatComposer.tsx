@@ -1,6 +1,6 @@
 import { StyleSheet, View } from "react-native";
 import { Button, HelperText, IconButton, Text, TextInput } from "react-native-paper";
-import { Mic, Send, Square } from "lucide-react-native";
+import { AudioLines, Mic, Send, Square } from "lucide-react-native";
 import { SuggestionChips } from "./SuggestionChips";
 import { colors, spacing } from "../../../shared/theme";
 
@@ -8,7 +8,6 @@ interface ChatComposerProps {
   transcript: string;
   recording: boolean;
   interpreting: boolean;
-  isAvailable: boolean;
   permissionDenied: boolean;
   permissionError?: string | null;
   error?: string | null;
@@ -16,6 +15,7 @@ interface ChatComposerProps {
   onStart: () => void;
   onStop: () => void;
   onSend: () => void;
+  onVoiceMode: () => void;
   onRequestPermission?: () => void;
 }
 
@@ -27,12 +27,14 @@ const SUGERENCIAS = [
   "Sino, corrige a 5 unidades",
 ];
 
-/** Entrada estilo chat: texto o dictado + enviar. Sin modal. */
+/**
+ * Entrada estilo chat: el micrófono siempre se ve (si no hay módulo nativo
+ * o permiso, al tocarlo explica cómo seguir en lugar de esconderse).
+ */
 export function ChatComposer({
   transcript,
   recording,
   interpreting,
-  isAvailable,
   permissionDenied,
   permissionError,
   error,
@@ -40,31 +42,29 @@ export function ChatComposer({
   onStart,
   onStop,
   onSend,
+  onVoiceMode,
   onRequestPermission,
 }: ChatComposerProps) {
-  if (permissionDenied || permissionError) {
-    return (
-      <View style={styles.box}>
-        <Text variant="bodyMedium" style={styles.copy}>
-          {permissionError ?? "Necesitamos permiso del micrófono para registrar operaciones por voz."}
-        </Text>
-        <Button mode="contained" onPress={onRequestPermission}>
-          {permissionError ? "Reintentar permiso" : "Permitir micrófono"}
-        </Button>
-      </View>
-    );
-  }
   return (
     <View style={styles.box}>
+      {permissionDenied || permissionError ? (
+        <View style={styles.permissionRow}>
+          <Text variant="bodySmall" style={styles.permissionText}>
+            {permissionError ?? "Activá el micrófono para dictar por voz."}
+          </Text>
+          <Button compact mode="text" onPress={onRequestPermission}>
+            Permitir
+          </Button>
+        </View>
+      ) : null}
       <SuggestionChips suggestions={SUGERENCIAS} onSelect={onTranscriptChange} />
       <View style={styles.row}>
-        {isAvailable ? (
-          <IconButton
-            mode="contained-tonal"
-            icon={() => (recording ? <Square size={20} /> : <Mic size={20} />)}
-            onPress={recording ? onStop : onStart}
-          />
-        ) : null}
+        <IconButton
+          mode="contained-tonal"
+          icon={() => (recording ? <Square size={20} /> : <Mic size={20} />)}
+          onPress={recording ? onStop : onStart}
+          accessibilityLabel={recording ? "Detener dictado" : "Dictar por voz"}
+        />
         <TextInput
           mode="outlined"
           style={styles.input}
@@ -75,10 +75,17 @@ export function ChatComposer({
           onSubmitEditing={onSend}
         />
         <IconButton
+          mode="outlined"
+          icon={() => <AudioLines size={20} />}
+          onPress={onVoiceMode}
+          accessibilityLabel="Abrir modo voz"
+        />
+        <IconButton
           mode="contained"
           icon={() => <Send size={20} />}
           onPress={onSend}
           disabled={interpreting || !transcript.trim()}
+          accessibilityLabel="Enviar mensaje"
         />
       </View>
       <HelperText type="error" visible={Boolean(error)}>
@@ -96,7 +103,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
   },
-  copy: { color: colors.textSecondary, lineHeight: 22 },
-  row: { flexDirection: "row", alignItems: "flex-end", gap: spacing.xs },
+  permissionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.xs },
+  permissionText: { flex: 1, color: colors.textSecondary },
+  row: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
   input: { flex: 1, backgroundColor: colors.surface, maxHeight: 110 },
 });

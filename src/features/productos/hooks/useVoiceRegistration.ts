@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { PermissionResponse } from "expo-modules-core";
 import {
   getSpeechRecognitionModule,
-  isSpeechRecognitionAvailable,
+  loadSpeechRecognitionAsync,
   useSpeechRecognitionEventSafe,
 } from "../../../shared/lib/speechRecognition";
 import {
@@ -15,15 +15,16 @@ type SpeechPermission = PermissionResponse & { restricted?: boolean };
 export type VoiceRegistrationState = "idle" | "listening" | "interpreting" | "done" | "error";
 
 export const VOICE_UNAVAILABLE_MESSAGE =
-  "El dictado por voz requiere un development build. Podés usar los ejemplos de IA para autocompletar.";
+  "No se pudo activar el dictado en este dispositivo (en Expo Go no hay micrófono nativo; en web o development build sí funciona). Podés usar los ejemplos de IA para autocompletar.";
 
 /**
  * Hook for voice-assisted product registration.
- * Expo Go-safe: si el módulo nativo no existe, el dictado se
- * desactiva pero `interpretPhrase` (texto → IA) sigue funcionando.
+ * No previene: intenta dictar y solo informa si el intento real falla;
+ * `interpretPhrase` (texto → IA) siempre sigue funcionando.
  */
 export function useVoiceRegistration() {
-  const [isAvailable] = useState(isSpeechRecognitionAvailable);
+  const [blocked, setBlocked] = useState(false);
+  const isAvailable = !blocked;
   const [permission, setPermission] = useState<SpeechPermission | null>(null);
   const [permissionLoading, setPermissionLoading] = useState(true);
   const [transcript, setTranscript] = useState("");
@@ -51,10 +52,11 @@ export function useVoiceRegistration() {
   useEffect(() => { void loadPermission(); }, [loadPermission]);
 
   const requestPermission = useCallback(async () => {
-    const native = getSpeechRecognitionModule();
+    const native = getSpeechRecognitionModule() ?? (await loadSpeechRecognitionAsync())?.ExpoSpeechRecognitionModule ?? null;
     if (!native) {
       setPermission(null);
       setPermissionLoading(false);
+      setBlocked(true);
       setError(VOICE_UNAVAILABLE_MESSAGE);
       return;
     }
@@ -109,19 +111,28 @@ export function useVoiceRegistration() {
     return () => { cancelled = true; };
   }, [state, transcript]);
 
-  const startListening = useCallback(() => {
-    const native = getSpeechRecognitionModule();
+  const startListening = useCallback(async () => {
+    setError(null);
+    const native = getSpeechRecognitionModule() ?? (await loadSpeechRecognitionAsync())?.ExpoSpeechRecognitionModule ?? null;
     if (!native) {
+      setBlocked(true);
       setError(VOICE_UNAVAILABLE_MESSAGE);
       setState("error");
       return;
     }
-    if (!permission?.granted) {
+    let granted = permission?.granted === true;
+    try {
+      const current = (await native.getPermissionsAsync()) as SpeechPermission;
+      setPermission(current);
+      granted = current.granted === true;
+    } catch {
+      // Se conserva el último permiso conocido; si no hay, se informa abajo.
+    }
+    if (!granted) {
       setError("Necesitamos permiso del micrófono.");
       setState("error");
       return;
     }
-    setError(null);
     setTranscript("");
     setResult(null);
     setState("listening");
@@ -168,6 +179,7 @@ export function useVoiceRegistration() {
 
   return {
     isAvailable,
+    blocked,
     permission,
     permissionLoading,
     requestPermission,
