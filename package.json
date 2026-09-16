@@ -50,7 +50,9 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "node --test tests/architecture.test.mjs tests/contracts.test.mjs tests/behavior.test.mjs tests/auth.test.mjs",
-    "smoke:live": "node scripts/supabase-live-read-smoke.mjs"
+    "smoke:live": "node scripts/supabase-live-read-smoke.mjs",
+    "build:apk": "eas build -p android --profile preview",
+    "build:dev": "eas build -p android --profile development"
   },
   "private": true
 }
