@@ -60,6 +60,6 @@ Todas las transacciones que antes ocurrían en controladores o servicios de Lara
 
 ## 5. Configuración del Cliente en `mobile/`
 - Cliente Supabase: `src/lib/supabase.ts`
-- Tipos TypeScript generados automáticamente: `src/types/database.types.ts`
+- Tipos TypeScript generados automáticamente: `src/shared/types/database.types.ts`
 - Adaptador de API: `src/lib/api.ts` (100% desacoplado de Laravel, consumiendo Supabase de forma nativa).
 - Variables de entorno: `mobile/.env`

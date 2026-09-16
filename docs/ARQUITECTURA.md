@@ -67,7 +67,9 @@ Lidemoda opera 5 sucursales (accesorios, belleza, regalos, hogar) sin un sistema
 └─────────────────────────────┘
 ```
 
-**Decisión clave:** la app móvil **no llama directamente a los proveedores de IA**. Las claves de API no deben viajar en el cliente. Todo lo que sea consumo de IA pasa por una Edge Function de Supabase, que además es el lugar natural para registrar consumo de tokens y aplicar el patrón de *fallback* entre proveedores.
+**Decisión normativa de seguridad:** la app móvil **debe** invocar una Edge Function para que las claves de proveedores IA nunca viajen al cliente. La Edge Function es el gateway autorizado para autenticación del proveedor, prompts y validación de respuestas.
+
+**Brecha de implementación actual:** el contrato heredado conserva una llamada directa a Gemini con `EXPO_PUBLIC_GEMINI_API_KEY` y un fallback heurístico local. Esta refactorización no inventa una Edge Function ni cambia ese contrato; la exposición de la clave queda registrada como una brecha de seguridad prioritaria que debe cerrarse en una iteración backend.
 
 ## 3. Stack tecnológico
 
@@ -104,35 +106,42 @@ mobile/src/
 │   │   └── _layout.tsx          # Configuración del Tab Bar
 │   ├── escanear.tsx             # Modal / Vista dedicada de escaneo de cámara
 │   ├── registrar-producto.tsx   # Modal de alta de producto
-│   └── _layout.tsx              # Provider de Tema (PaperProvider) y Auth
+│   ├── registro-voz.tsx         # Modal de registro por voz
+│   ├── movimientos.tsx          # Ruta compatible de movimientos
+│   ├── nueva-venta.tsx          # Ruta compatible del POS
+│   └── _layout.tsx              # SafeAreaProvider, QueryClientProvider y PaperProvider
 │
 ├── features/                    # Vertical Slices (Lógica de negocio encapsulada)
 │   ├── dashboard/               # Métricas, KPIs, gráfico semanal y alertas de inventario
-│   │   ├── components/          # KpiGrid, SalesWeeklyChart, PredictiveAlertCard, LowStockList
+│   │   ├── components/          # KpiGrid, SalesWeeklyChart, LowStockList
 │   │   ├── hooks/               # useDashboardMetrics()
-│   │   └── api/                 # getDashboardKpis(), getWeeklySales()
+│   │   └── api/                 # obtenerDashboardMetrics() — ventas/inventarios reales
 │   ├── productos/               # Catálogo, alta, edición y filtros
 │   │   ├── components/          # ProductCard, ProductForm, BarcodeScannerView
 │   │   ├── hooks/               # useProductos(), useRegistrarProducto()
-│   │   └── api/                 # fetchProductos(), createProducto()
+│   │   └── api/                 # obtenerProductos(), registrarProducto(), buscarProductoPorCodigo()
 │   ├── inventario/              # Stock multi-sucursal y movimientos
-│   │   ├── components/          # StockBranchList, DispatchForm, ReceiveConfirmationModal
-│   │   ├── hooks/               # useStockMultiSucursal(), useDespachoMercaderia()
-│   │   └── api/                 # fetchStockConsolidado(), createDespacho()
+│   │   ├── components/          # InventarioCard, StockBranchList, TransferModal
+│   │   ├── hooks/               # useStockMultiSucursal(), useMovimientos()
+│   │   └── api/                 # obtenerInventario(), registrarEntrada/Salida/Transferencia()
 │   ├── ventas/                  # POS, armado de ticket y cobro transaccional
 │   │   ├── components/          # SaleCart, PaymentSelector, SaleSummaryModal
 │   │   ├── hooks/               # useVentas(), useProcesarVenta()
-│   │   └── api/                 # rpcRegistrarVenta()
+│   │   └── api/                 # obtenerVentas(), registrarVenta()
 │   └── asistente-ia/            # Asistencia por voz y consultas en lenguaje natural
-│       ├── components/          # VoiceRecordDrawer, ConfirmationModal, AssistantBar, SuggestionChips
-│       ├── hooks/               # useVoiceCommand(), useAssistantQuery()
-│       └── api/                 # interpretVoiceWithIA(), queryAssistantNL()
+│       ├── components/          # RegistroVozDrawer, ConfirmationModal, SuggestionChips
+│       ├── hooks/               # useVoiceCommand()
+│       ├── api/                 # interpretarTextoVoz(), interpretarVoz()
+│       └── screens/             # RegistroVozScreen, VoiceCommandView
 │
 └── shared/                      # Componentes reutilizables y utilidades comunes
-    ├── components/              # AppHeader, ScreenContainer, StatusBadge, ActionPill
+    ├── components/              # AppHeader, ScreenContainer, StatusBadge
     ├── theme/                   # Tokens oficiales de diseño (Colores, Tipografía, Radios)
-    ├── lib/                     # supabase.ts (cliente Supabase único inicializado)
-    └── hooks/                   # useAuth(), useActiveBranch()
+    ├── lib/                     # supabase.ts, queryClient.ts, pagination.ts, utils.ts
+    ├── api/                     # sucursalesApi.ts (acceso compartido a sucursales)
+    ├── hooks/                   # useSucursales()
+    ├── types/                   # database.types.ts (generado), domain.ts
+    └── screens/                 # MasScreen.tsx
 ```
 
 #### Reglas de diseño de código frontend:
@@ -140,6 +149,8 @@ mobile/src/
 2. **Container-Presentational Pattern:** Los componentes visuales no ejecutan llamadas directas a APIs ni consultas a base de datos; reciben datos y callbacks a través de sus props o hooks de feature.
 3. **Aislamiento de Supabase:** Ningún componente JSX interactúa directamente con `supabase.from()`. Toda interacción vive en la subcarpeta `api/` de cada feature y se expone mediante hooks basados en TanStack Query.
 4. **Validación Zod en frontera:** Toda respuesta de IA (voz/asistente) y todo formulario se valida con un esquema Zod antes de mutar estado o impactar base de datos.
+5. **Datos reales:** El dashboard solo agrega filas de `ventas` e `inventarios`; los días sin ventas se muestran como cero derivado, nunca como datos de demostración.
+6. **Límite de seguridad IA:** Las claves de proveedores no deben existir en el bundle móvil; el diseño normativo exige una Edge Function gateway. La integración Gemini directa actual es una brecha explícita, no la regla arquitectónica.
 
 ---
 
@@ -231,7 +242,8 @@ export const LidemodaPalette = {
 
 - **RLS como capa de autorización principal:** Cada rol (`asesora`, `cajera`, `reponedora`, `almacen`, `admin`) tiene políticas SQL explícitas por tabla. El cliente móvil jamás manipula permisos a mano.
 - **Transacciones de venta (RPC `registrar_venta`):** Función `plpgsql` que ejecuta el descuento atómico de stock e inserción de venta en un solo bloque `BEGIN ... COMMIT`, bloqueando sobreventas (`RN-01`).
-- **Edge Functions como API Gateway de IA:** Las claves de Groq y Gemini viven exclusivamente en las variables de entorno de Supabase. La app móvil invoca la Edge Function `ai-service`, la cual registra tokens, aplica el prompt del sistema y devuelve respuestas limpias en JSON.
+- **Gateway normativo de IA:** Las claves de Groq/Gemini deben vivir exclusivamente en variables de entorno de Supabase y la app móvil debe invocar la Edge Function `ai-service` como gateway.
+- **Brecha actual registrada:** El cliente mantiene la integración directa Gemini heredada y su fallback heurístico local. No se cambia el RPC ni se crea una función remota como parte de esta refactorización; migrar la clave al gateway backend es una corrección de seguridad prioritaria.
 
 ---
 
@@ -240,4 +252,3 @@ export const LidemodaPalette = {
 - **Ramas Git:** `feat/HU-01-login-sucursales`, `feat/HU-02-catalogo`, etc.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`).
 - **Tablas SQL:** En español, singular y snake_case (`sucursal`, `producto`, `inventario`, `movimiento`, `venta`, `venta_detalle`, `perfil_usuario`).
-
