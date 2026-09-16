@@ -18,8 +18,19 @@ import { SaleSummaryModal } from "../components/SaleSummaryModal";
 import { useProcesarVenta } from "../hooks/useProcesarVenta";
 import { useVentas } from "../hooks/useVentas";
 import { limpiarProductoPendiente, peekProductoPendiente } from "../lib/pendienteVenta";
+import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
+import { useAuth } from "../../auth/hooks/useAuth";
+import { can } from "../../auth/lib/permissions";
+import { PermissionDenied } from "../../auth/components/PermissionDenied";
 
 export function VentasScreen() {
+  const { profile } = useAuth();
+  if (!can(profile?.rol, "sales.read")) return <PermissionDenied message="Tu rol no tiene acceso al módulo de ventas." />;
+  return <VentasContent />;
+}
+
+function VentasContent() {
+  const { activeBranchId, canChangeBranch, selectBranch } = useActiveBranch();
   const branches = useSucursales();
   const stock = useStockMultiSucursal();
   const [branchId, setBranchId] = useState<number | null>(null);
@@ -42,10 +53,12 @@ export function VentasScreen() {
   }, [search]);
 
   useEffect(() => {
-    if (branchId === null && branches.data?.length) {
+    if (!canChangeBranch && activeBranchId !== null) {
+      setBranchId(activeBranchId);
+    } else if (branchId === null && branches.data?.length) {
       setBranchId(branches.data[0].id);
     }
-  }, [branches.data, branchId]);
+  }, [activeBranchId, branches.data, branchId, canChangeBranch]);
 
   const refreshForScreen = useCallback(async () => {
     setPendingProduct(null);
@@ -152,7 +165,9 @@ export function VentasScreen() {
 
   const remove = (id: number) => setCart((items) => items.filter((item) => item.producto.id !== id));
   const changeBranch = (id: number) => {
+    if (!canChangeBranch && id !== activeBranchId) return;
     setBranchId(id);
+    selectBranch(id);
     setCart([]);
   };
 
@@ -182,7 +197,6 @@ export function VentasScreen() {
   const mutationError = mutation.error
     ? extraerMensajeError(mutation.error, "No se pudo registrar la venta.")
     : null;
-
   return (
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -199,7 +213,7 @@ export function VentasScreen() {
         ) : null}
         <Text variant="labelLarge">Sucursal</Text>
         <View style={styles.chips}>
-          {(branches.data ?? []).map((branch) => (
+          {(branches.data ?? []).filter((branch) => canChangeBranch || branch.id === activeBranchId).map((branch) => (
             <Chip key={branch.id} selected={branch.id === branchId} onPress={() => changeBranch(branch.id)}>
               {branch.nombre}
             </Chip>

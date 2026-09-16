@@ -6,8 +6,19 @@ import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useRegistrarProducto } from "../hooks/useRegistrarProducto";
 import { ProductForm } from "../components/ProductForm";
 import { extraerMensajeError } from "../../../shared/lib/utils";
+import { useAuth } from "../../auth/hooks/useAuth";
+import { can } from "../../auth/lib/permissions";
+import { PermissionDenied } from "../../auth/components/PermissionDenied";
+import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 
 export function RegistrarProductoScreen() {
+  const { profile } = useAuth();
+  if (!can(profile?.rol, "products.write")) return <PermissionDenied message="Solo administración o almacén pueden registrar productos." />;
+  return <RegistrarProductoForm />;
+}
+
+function RegistrarProductoForm() {
+  const { activeBranchId, canChangeBranch } = useActiveBranch();
   const branches = useSucursales();
   const mutation = useRegistrarProducto();
   const [resetToken, setResetToken] = useState(0);
@@ -23,5 +34,6 @@ export function RegistrarProductoScreen() {
       ],
     );
   }, [mutation.data, mutation.isSuccess, mutation.reset]);
-  return <ScreenContainer><ProductForm resetToken={resetToken} branches={branches.data ?? []} loading={mutation.isPending} serverError={mutation.error ? extraerMensajeError(mutation.error, "No se pudo registrar el producto.") : null} onSubmit={(input) => mutation.mutate(input)} /></ScreenContainer>;
+  const availableBranches = canChangeBranch ? branches.data ?? [] : (branches.data ?? []).filter((branch) => branch.id === activeBranchId);
+  return <ScreenContainer><ProductForm resetToken={resetToken} branches={availableBranches} loading={mutation.isPending} serverError={mutation.error ? extraerMensajeError(mutation.error, "No se pudo registrar el producto.") : null} onSubmit={(input) => mutation.mutate(input)} /></ScreenContainer>;
 }
