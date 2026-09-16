@@ -263,3 +263,24 @@ test("mobile build configuration contains valid EAS preview profile and Android 
   assert.equal(appConfig.expo?.android?.versionCode, 1);
   assert.deepEqual(appConfig.expo?.android?.permissions, ["CAMERA", "RECORD_AUDIO"]);
 });
+
+test("product update schema validates editable fields and rejects invalid prices", () => {
+  const { ActualizarProductoSchema } = loadTsModule("src/features/productos/api/productosApi.ts");
+
+  const valid = {
+    nombre: "Jean Mom Fit Clásico",
+    codigo: "JEA-001",
+    categoria: "Pantalones",
+    precio: 185.5,
+  };
+  assert.equal(ActualizarProductoSchema.safeParse(valid).success, true);
+
+  // Rejects empty name
+  assert.equal(ActualizarProductoSchema.safeParse({ ...valid, nombre: "" }).success, false);
+  // Rejects empty sku
+  assert.equal(ActualizarProductoSchema.safeParse({ ...valid, codigo: "   " }).success, false);
+  // Rejects negative price
+  assert.equal(ActualizarProductoSchema.safeParse({ ...valid, precio: -10 }).success, false);
+  // Rejects NaN price
+  assert.equal(ActualizarProductoSchema.safeParse({ ...valid, precio: Number.NaN }).success, false);
+});

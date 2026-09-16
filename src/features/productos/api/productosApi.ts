@@ -94,3 +94,105 @@ export async function obtenerCategoriasProductos(): Promise<string[]> {
   });
   return Array.from(new Set(rows.map((row) => row.categoria))).sort((a, b) => a.localeCompare(b, "es"));
 }
+
+export const ActualizarProductoSchema = z.object({
+  nombre: z.string().trim().min(1, "El nombre es obligatorio.").max(255),
+  codigo: z.string().trim().min(1, "El código es obligatorio.").max(255),
+  categoria: z.string().trim().min(1, "La categoría es obligatoria.").max(255),
+  precio: z.number().finite().nonnegative("El precio debe ser mayor o igual a 0."),
+});
+
+export type ActualizarProductoParams = z.infer<typeof ActualizarProductoSchema>;
+
+export async function actualizarProducto(id: number, params: ActualizarProductoParams): Promise<Producto> {
+  const productId = z.number().int().positive().parse(id);
+  const input = ActualizarProductoSchema.parse(params);
+  const { data, error } = await supabase
+    .from("productos")
+    .update({
+      nombre: input.nombre,
+      codigo: input.codigo,
+      categoria: input.categoria,
+      precio: input.precio,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", productId)
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === "23505" || error.message.includes("unique")) {
+      throw new Error("El código SKU ya existe en otro producto.");
+    }
+    throw new Error(error.message);
+  }
+  return data as Producto;
+}
+
+export interface StockSucursalProducto {
+  sucursalId: number;
+  sucursalNombre: string;
+  cantidad: number;
+}
+
+export async function obtenerStockProducto(productoId: number): Promise<StockSucursalProducto[]> {
+  const id = z.number().int().positive().parse(productoId);
+  const { data, error } = await supabase
+    .from("inventarios")
+    .select("sucursal_id, cantidad, sucursal:sucursales(id, nombre)")
+    .eq("producto_id", id)
+    .order("sucursal_id", { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row: any) => {
+    const sucursal = Array.isArray(row.sucursal) ? row.sucursal[0] : row.sucursal;
+    return {
+      sucursalId: row.sucursal_id,
+      sucursalNombre: sucursal?.nombre ?? `Sucursal ${row.sucursal_id}`,
+      cantidad: row.cantidad ?? 0,
+    };
+  });
+}
+
+export interface MovimientoHistorial {
+  id: number;
+  tipo: "entrada" | "salida" | "transferencia" | string;
+  cantidad: number;
+  observacion: string;
+  fecha: string;
+  sucursalOrigenNombre: string;
+  sucursalDestinoNombre: string | null;
+}
+
+export async function obtenerHistorialProducto(productoId: number): Promise<MovimientoHistorial[]> {
+  const id = z.number().int().positive().parse(productoId);
+  const { data, error } = await supabase
+    .from("movimientos")
+    .select(`
+      id,
+      tipo,
+      cantidad,
+      observacion,
+      created_at,
+      sucursal:sucursales!movimientos_sucursal_id_fkey(nombre),
+      sucursal_destino:sucursales!movimientos_sucursal_destino_id_fkey(nombre)
+    `)
+    .eq("producto_id", id)
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row: any) => {
+    const sucursal = Array.isArray(row.sucursal) ? row.sucursal[0] : row.sucursal;
+    const sucursalDestino = Array.isArray(row.sucursal_destino) ? row.sucursal_destino[0] : row.sucursal_destino;
+    return {
+      id: row.id,
+      tipo: row.tipo,
+      cantidad: row.cantidad,
+      observacion: row.observacion || "",
+      fecha: row.created_at,
+      sucursalOrigenNombre: sucursal?.nombre ?? "Desconocida",
+      sucursalDestinoNombre: sucursalDestino?.nombre ?? null,
+    };
+  });
+}
