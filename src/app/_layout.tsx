@@ -1,11 +1,25 @@
 import { Stack } from "expo-router";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { PaperProvider } from "react-native-paper";
-import { paperTheme } from "../constants/theme";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { paperTheme } from "../shared/theme";
+import { queryClient } from "../shared/lib/queryClient";
 
 export default function RootLayout() {
   return (
-    <PaperProvider theme={paperTheme}>
-      <Stack screenOptions={{ headerShown: false }} />
-    </PaperProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <PaperProvider theme={paperTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="escanear" options={{ presentation: "modal" }} />
+            <Stack.Screen name="registrar-producto" options={{ presentation: "modal" }} />
+            <Stack.Screen name="registro-voz" options={{ presentation: "modal" }} />
+            <Stack.Screen name="movimientos" />
+            <Stack.Screen name="nueva-venta" />
+          </Stack>
+        </PaperProvider>
+      </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }
