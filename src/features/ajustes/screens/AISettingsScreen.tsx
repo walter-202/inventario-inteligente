@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import {
   Button,
   Card,
+  Chip,
   HelperText,
   Modal,
   Portal,
@@ -213,10 +214,14 @@ export function AISettingsScreen() {
           <HelperText type="info" visible>
             {preferredMode === "auto" &&
               "Intenta en orden de velocidad y cuota gratuita disponible (Groq → Cerebras → OpenRouter → Gemini). Si fallan, usa heurística local."}
-            {preferredMode === "groq" && "Fuerza el uso exclusivo de Groq Cloud (Llama 3.3 70B)."}
-            {preferredMode === "cerebras" && "Fuerza el uso exclusivo de Cerebras Inference (Llama 3.3 70B)."}
-            {preferredMode === "openrouter" && "Fuerza el uso exclusivo de OpenRouter."}
-            {preferredMode === "gemini" && "Fuerza el uso exclusivo de Google Gemini."}
+            {preferredMode === "groq" &&
+              `Fuerza el uso de Groq Cloud (${customModels.groq || AI_PROVIDERS.groq.defaultModel}).`}
+            {preferredMode === "cerebras" &&
+              `Fuerza el uso de Cerebras Cloud (${customModels.cerebras || AI_PROVIDERS.cerebras.defaultModel}).`}
+            {preferredMode === "openrouter" &&
+              `Fuerza el uso de OpenRouter (${customModels.openrouter || AI_PROVIDERS.openrouter.defaultModel}).`}
+            {preferredMode === "gemini" &&
+              `Fuerza el uso de Google Gemini (${customModels.gemini || AI_PROVIDERS.gemini.defaultModel}).`}
             {preferredMode === "heuristic" && "Modo sin IA externa: procesa comandos localmente sin internet."}
           </HelperText>
         </Card.Content>
@@ -294,6 +299,31 @@ export function AISettingsScreen() {
                 mode="outlined"
                 style={styles.input}
               />
+
+              <View style={styles.recommendedModelsWrap}>
+                <Text variant="labelSmall" style={styles.recommendedTitle}>
+                  Modelos destacados (toca para elegir):
+                </Text>
+                <View style={styles.chipRow}>
+                  {editingProvider.recommendedModels.map((model) => {
+                    const isSelected =
+                      inputModel === model || (!inputModel && model === editingProvider.defaultModel);
+                    return (
+                      <Chip
+                        key={model}
+                        compact
+                        mode={isSelected ? "flat" : "outlined"}
+                        selected={isSelected}
+                        style={[styles.modelChip, isSelected && styles.modelChipSelected]}
+                        textStyle={styles.modelChipText}
+                        onPress={() => setInputModel(model)}
+                      >
+                        {model}
+                      </Chip>
+                    );
+                  })}
+                </View>
+              </View>
 
               {modalTestResult ? (
                 <HelperText
@@ -424,6 +454,27 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: colors.surface,
+  },
+  recommendedModelsWrap: {
+    gap: spacing.xs,
+  },
+  recommendedTitle: {
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  modelChip: {
+    height: 28,
+  },
+  modelChipSelected: {
+    backgroundColor: colors.primarySoft,
+  },
+  modelChipText: {
+    fontSize: 11,
   },
   modalActions: {
     flexDirection: "row",
