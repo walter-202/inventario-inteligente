@@ -1,0 +1,77 @@
+import { MD3LightTheme } from "react-native-paper";
+
+/** Design tokens for the Lidemoda mobile client. */
+export const colors = {
+  primary: "#2563EB",
+  primaryDark: "#1D4ED8",
+  primarySoft: "#EFF6FF",
+  primaryBorder: "#DBEAFE",
+  secondary: "#6366F1",
+  secondaryDark: "#4F46E5",
+  secondarySoft: "#EEF2FF",
+  tertiary: "#06B6D4",
+  tertiaryDark: "#0891B2",
+  tertiarySoft: "#ECFEFF",
+  neutral: "#0F172A",
+  neutralDark: "#0B1120",
+  textPrimary: "#0F172A",
+  textSecondary: "#475569",
+  textMuted: "#64748B",
+  background: "#F8FAFC",
+  surface: "#FFFFFF",
+  surfaceSecondary: "#F1F5F9",
+  border: "#E2E8F0",
+  borderLight: "#F1F5F9",
+  white: "#FFFFFF",
+  black: "#000000",
+  danger: "#DC2626",
+  dangerSoft: "#FEE2E2",
+  warning: "#D97706",
+  warningSoft: "#FEF3C7",
+  success: "#10B981",
+  successSoft: "#D1FAE5",
+  info: "#2563EB",
+  infoSoft: "#DBEAFE",
+} as const;
+
+export const typography = {
+  fontFamily: { heading: "System", body: "System", mono: "monospace" },
+  sizes: { hero: 32, title: 24, heading: 18, subheading: 16, body: 14, caption: 12, micro: 10 },
+  weights: {
+    regular: "400" as const,
+    medium: "500" as const,
+    semibold: "600" as const,
+    bold: "700" as const,
+    heavy: "800" as const,
+  },
+};
+
+export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 } as const;
+export const radius = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, pill: 9999 } as const;
+export const shadows = {
+  subtle: { shadowColor: colors.neutral, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  card: { shadowColor: colors.neutral, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  floating: { shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 6 },
+} as const;
+
+/** Paper MD3 theme; extend the official MD3 light theme rather than replacing it. */
+export const paperTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: colors.primary,
+    primaryContainer: colors.primarySoft,
+    secondary: colors.secondary,
+    secondaryContainer: colors.secondarySoft,
+    tertiary: colors.tertiary,
+    tertiaryContainer: colors.tertiarySoft,
+    background: colors.background,
+    surface: colors.surface,
+    error: colors.danger,
+    errorContainer: colors.dangerSoft,
+    outline: colors.border,
+  },
+};
+
+export type AppTheme = typeof paperTheme;
+export const theme = { colors, typography, spacing, radius, shadows, paperTheme };
