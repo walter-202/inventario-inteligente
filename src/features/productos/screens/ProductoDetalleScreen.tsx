@@ -149,6 +149,7 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
           {
             value: "stock",
             label: "Stock en sucursales",
+            showSelectedCheck: false,
             icon: () => (
               <Package size={16} color={tab === "stock" ? colors.primary : colors.textSecondary} />
             ),
@@ -156,6 +157,7 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
           {
             value: "historial",
             label: "Historial de movimientos",
+            showSelectedCheck: false,
             icon: () => (
               <Clock size={16} color={tab === "historial" ? colors.primary : colors.textSecondary} />
             ),

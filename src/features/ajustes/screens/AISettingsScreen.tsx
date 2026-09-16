@@ -201,12 +201,12 @@ export function AISettingsScreen() {
             value={preferredMode}
             onValueChange={handleModeChange}
             buttons={[
-              { value: "auto", label: "Auto" },
-              { value: "groq", label: "Groq" },
-              { value: "cerebras", label: "Cerebras" },
-              { value: "openrouter", label: "OpenRouter" },
-              { value: "gemini", label: "Gemini" },
-              { value: "heuristic", label: "Offline" },
+              { value: "auto", label: "Auto", showSelectedCheck: false },
+              { value: "groq", label: "Groq", showSelectedCheck: false },
+              { value: "cerebras", label: "Cerebras", showSelectedCheck: false },
+              { value: "openrouter", label: "OpenRouter", showSelectedCheck: false },
+              { value: "gemini", label: "Gemini", showSelectedCheck: false },
+              { value: "heuristic", label: "Offline", showSelectedCheck: false },
             ]}
             style={styles.segmentedButtons}
           />
