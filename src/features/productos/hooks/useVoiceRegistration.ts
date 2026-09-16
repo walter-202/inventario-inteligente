@@ -119,6 +119,24 @@ export function useVoiceRegistration() {
     setError(null);
   }, []);
 
+  const interpretPhrase = useCallback(async (phrase: string) => {
+    const trimmed = phrase.trim();
+    if (!trimmed) return null;
+    setError(null);
+    setTranscript(trimmed);
+    setState("interpreting");
+    try {
+      const parsed = await interpretarRegistroProducto(trimmed);
+      setResult(parsed);
+      setState("done");
+      return parsed;
+    } catch {
+      setError("No se pudo interpretar el dictado.");
+      setState("error");
+      return null;
+    }
+  }, []);
+
   return {
     permission,
     permissionLoading,
@@ -129,6 +147,7 @@ export function useVoiceRegistration() {
     error,
     startListening,
     stopListening,
+    interpretPhrase,
     reset,
   };
 }

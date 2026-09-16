@@ -1,6 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, ScrollView, StyleSheet, View } from "react-native";
 import { Button, Card, Chip, HelperText, IconButton, Surface, Text, TextInput } from "react-native-paper";
+import {
+  Tag,
+  Barcode,
+  Layers,
+  DollarSign,
+  Package,
+  Mic,
+  Square,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Store,
+  Check,
+  Lightbulb,
+} from "lucide-react-native";
 import { ProductoInputSchema } from "../api/productosApi";
 import type { NuevoProductoParams, Sucursal } from "../../../shared/types/domain";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
@@ -17,16 +32,16 @@ function usePulse(active: boolean) {
       const loop = Animated.loop(
         Animated.sequence([
           Animated.parallel([
-            Animated.timing(scale, { toValue: 1.6, duration: 900, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0, duration: 900, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+            Animated.timing(scale, { toValue: 1.5, duration: 800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0, duration: 800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
           ]),
           Animated.parallel([
             Animated.timing(scale, { toValue: 1, duration: 0, useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0.35, duration: 0, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0.4, duration: 0, useNativeDriver: true }),
           ]),
         ]),
       );
-      opacity.setValue(0.35);
+      opacity.setValue(0.4);
       loop.start();
       return () => loop.stop();
     }
@@ -37,33 +52,106 @@ function usePulse(active: boolean) {
   return { scale, opacity };
 }
 
-// ─── Voice status bar ──────────────────────────────────────────────────────────
+// ─── Voice status bar with Lucide icons ─────────────────────────────────────────
 
-const STATUS_CONFIG: Record<VoiceRegistrationState, { icon: string; label: string; color: string; bg: string }> = {
-  idle: { icon: "microphone", label: "Toca el micrófono para dictar", color: colors.textMuted, bg: colors.surfaceSecondary },
-  listening: { icon: "microphone", label: "Escuchando...", color: colors.primary, bg: colors.primarySoft },
-  interpreting: { icon: "brain", label: "Interpretando...", color: colors.secondary, bg: colors.secondarySoft },
-  done: { icon: "check-circle", label: "Campos completados", color: colors.success, bg: colors.successSoft },
-  error: { icon: "alert-circle", label: "Error al interpretar", color: colors.danger, bg: colors.dangerSoft },
-};
+interface VoiceStatusBarProps {
+  state: VoiceRegistrationState;
+  transcript: string;
+  error: string | null;
+  onClear: () => void;
+}
 
-function VoiceStatusBar({ state, transcript, error }: { state: VoiceRegistrationState; transcript: string; error: string | null }) {
-  const config = STATUS_CONFIG[state];
+function VoiceStatusBar({ state, transcript, error, onClear }: VoiceStatusBarProps) {
+  if (state === "idle" && !transcript) return null;
+
+  const getStatus = () => {
+    switch (state) {
+      case "listening":
+        return {
+          icon: <Mic size={18} color="#EF4444" />,
+          label: "Escuchando dictado...",
+          color: "#DC2626",
+          bg: "#FEF2F2",
+          border: "#FCA5A5",
+        };
+      case "interpreting":
+        return {
+          icon: <Sparkles size={18} color="#2563EB" />,
+          label: "Interpretando con IA...",
+          color: "#1D4ED8",
+          bg: "#EFF6FF",
+          border: "#93C5FD",
+        };
+      case "done":
+        return {
+          icon: <CheckCircle2 size={18} color="#059669" />,
+          label: "¡Campos completados por voz!",
+          color: "#047857",
+          bg: "#ECFDF5",
+          border: "#6EE7B7",
+        };
+      case "error":
+        return {
+          icon: <AlertCircle size={18} color="#DC2626" />,
+          label: error || "Error al interpretar",
+          color: "#B91C1C",
+          bg: "#FEF2F2",
+          border: "#F87171",
+        };
+      default:
+        return null;
+    }
+  };
+
+  const status = getStatus();
+  if (!status) return null;
+
   return (
-    <Surface style={[styles.statusBar, { backgroundColor: config.bg }]} elevation={0}>
+    <Surface style={[styles.statusBar, { backgroundColor: status.bg, borderColor: status.border }]} elevation={0}>
       <View style={styles.statusRow}>
-        <IconButton icon={config.icon} iconColor={config.color} size={18} style={styles.statusIcon} />
-        <Text variant="labelMedium" style={{ color: config.color, flex: 1 }}>
-          {state === "error" && error ? error : config.label}
+        <View style={styles.statusIconWrapper}>{status.icon}</View>
+        <Text variant="labelMedium" style={{ color: status.color, flex: 1, fontWeight: "700" }}>
+          {status.label}
         </Text>
+        {state === "done" || state === "error" ? (
+          <Button compact mode="text" textColor={status.color} onPress={onClear}>
+            Cerrar
+          </Button>
+        ) : null}
       </View>
-      {transcript && state !== "idle" ? (
-        <Text variant="bodySmall" style={styles.transcript} numberOfLines={3}>
+      {transcript ? (
+        <Text variant="bodySmall" style={styles.transcript} numberOfLines={2}>
           &ldquo;{transcript}&rdquo;
         </Text>
       ) : null}
     </Surface>
   );
+}
+
+// ─── Fashion categories shortcuts ──────────────────────────────────────────────
+
+const FASHION_CATEGORIES = [
+  "Pantalones",
+  "Chompas",
+  "Blusas",
+  "Vestidos",
+  "Poleras",
+  "Chaquetas",
+  "Accesorios",
+];
+
+const VOICE_EXAMPLES = [
+  "Chompa lana alpaca código CHO-500 precio 220 cantidad 15 categoría Chompas",
+  "Vestido floral primavera código VES-400 precio 260 cantidad 20 categoría Vestidos",
+  "Jean cargo negro código JEA-300 precio 195 cantidad 30 categoría Pantalones",
+];
+
+// Helper to format long branch names cleanly
+function formatBranchName(rawName: string): string {
+  return rawName
+    .replace(/^Lidemoda\s+(?:La\s+Paz\s*[-–]?\s*)?(?:Sucursal\s*)?/i, "")
+    .replace(/^Sucursal\s*/i, "")
+    .trim() || rawName;
 }
 
 // ─── Main form ─────────────────────────────────────────────────────────────────
@@ -82,6 +170,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
   const [values, setValues] = useState({ nombre: "", codigo: "", categoria: "", precio: "", cantidad: "" });
   const [sucursalId, setSucursalId] = useState<number | null>(branches[0]?.id ?? null);
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
+  const [showExamples, setShowExamples] = useState(false);
 
   const voice = useVoiceRegistration();
   const pulse = usePulse(voice.state === "listening");
@@ -124,6 +213,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
     else if (!Number.isFinite(precio) || precio < 0) numericErrors.precio = "El precio debe ser un número mayor o igual a 0.";
     if (!cantidadText) numericErrors.cantidad = "La cantidad inicial es obligatoria.";
     else if (!/^\d+$/.test(cantidadText)) numericErrors.cantidad = "La cantidad inicial debe ser un entero mayor o igual a 0.";
+
     const result = ProductoInputSchema.safeParse({
       nombre: values.nombre,
       codigo: values.codigo,
@@ -132,6 +222,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
       cantidad: cantidadText ? cantidad : Number.NaN,
       sucursal_id: sucursalId,
     });
+
     if (!result.success) {
       const next: Partial<Record<Field, string>> = {};
       for (const issue of result.error.issues) {
@@ -156,63 +247,54 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
     }
     if (!voice.permission?.granted) {
       await voice.requestPermission();
-      // Re-check after request
-      if (!voice.permission?.granted) return;
+      if (!voice.permission?.granted) {
+        // If microphone is unavailable (e.g. web), offer the example test drawer
+        setShowExamples(true);
+        return;
+      }
     }
     voice.reset();
     voice.startListening();
   };
 
   const isVoiceBusy = voice.state === "listening" || voice.state === "interpreting";
-  const micIcon = voice.state === "listening" ? "stop" : "microphone";
-  const micColor = voice.state === "listening" ? colors.danger : colors.white;
-  const micBg = voice.state === "listening" ? colors.dangerSoft : colors.primary;
-
-  const input = (field: keyof typeof values, label: string, icon: string, keyboardType?: "default" | "decimal-pad" | "number-pad") => (
-    <View key={field} style={styles.field}>
-      <TextInput
-        mode="outlined"
-        label={label}
-        value={values[field]}
-        onChangeText={(value) => update(field, value)}
-        keyboardType={keyboardType}
-        error={Boolean(errors[field])}
-        autoCapitalize={field === "codigo" ? "characters" : "sentences"}
-        left={<TextInput.Icon icon={icon} color={colors.textMuted} />}
-      />
-      <HelperText type="error" visible={Boolean(errors[field])}>{errors[field]}</HelperText>
-    </View>
-  );
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <Card mode="outlined" style={styles.card}>
         <Card.Content>
-          {/* Header with mic button */}
+          {/* Header with modern AI Voice action */}
           <View style={styles.header}>
             <View style={styles.headerText}>
-              <Text variant="titleLarge" style={styles.title}>Registrar producto</Text>
+              <Text variant="titleLarge" style={styles.title}>Registrar prenda</Text>
               <Text variant="bodySmall" style={styles.subtitle}>
-                Completa los campos o usa el micrófono
+                Completá los campos o usá el asistente IA
               </Text>
             </View>
-            <View style={styles.micContainer}>
-              {/* Animated pulse ring */}
+
+            <View style={styles.micWrapper}>
+              {/* Pulse animation ring */}
               <Animated.View
                 style={[
                   styles.pulseRing,
                   {
-                    backgroundColor: colors.primary,
                     transform: [{ scale: pulse.scale }],
                     opacity: pulse.opacity,
                   },
                 ]}
               />
               <IconButton
-                icon={micIcon}
-                iconColor={micColor}
+                mode={voice.state === "listening" ? "contained" : "contained-tonal"}
+                containerColor={voice.state === "listening" ? "#EF4444" : colors.primarySoft}
+                icon={() =>
+                  voice.state === "listening" ? (
+                    <Square size={22} color={colors.white} />
+                  ) : (
+                    <Mic size={22} color={colors.primary} />
+                  )
+                }
                 size={28}
-                style={[styles.micButton, { backgroundColor: micBg }]}
+                style={styles.micButton}
                 onPress={handleMicPress}
                 disabled={voice.permissionLoading || voice.state === "interpreting"}
                 accessibilityLabel={voice.state === "listening" ? "Detener dictado" : "Iniciar dictado por voz"}
@@ -220,50 +302,195 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
             </View>
           </View>
 
-          {/* Voice status */}
-          {voice.state !== "idle" ? (
-            <VoiceStatusBar state={voice.state} transcript={voice.transcript} error={voice.error} />
+          {/* Quick AI test toggle button */}
+          <View style={styles.aiToggleRow}>
+            <Button
+              compact
+              mode="text"
+              icon={() => <Sparkles size={16} color={colors.primary} />}
+              onPress={() => setShowExamples(!showExamples)}
+            >
+              {showExamples ? "Ocultar frases de prueba IA" : "Probar con ejemplos de voz IA"}
+            </Button>
+          </View>
+
+          {/* Example voice phrases drawer for quick demo / web testing */}
+          {showExamples ? (
+            <Surface style={styles.examplesCard} elevation={0}>
+              <Text variant="labelSmall" style={styles.examplesTitle}>
+                Tocá un ejemplo para auto-completar con IA:
+              </Text>
+              <View style={styles.examplesList}>
+                {VOICE_EXAMPLES.map((phrase) => (
+                  <Chip
+                    key={phrase}
+                    icon={() => <Lightbulb size={14} color={colors.primary} />}
+                    onPress={() => {
+                      voice.interpretPhrase(phrase);
+                      setShowExamples(false);
+                    }}
+                    style={styles.exampleChip}
+                    textStyle={styles.exampleChipText}
+                  >
+                    {phrase}
+                  </Chip>
+                ))}
+              </View>
+            </Surface>
           ) : null}
 
-          {/* Form fields */}
+          {/* Voice status banner */}
+          <VoiceStatusBar
+            state={voice.state}
+            transcript={voice.transcript}
+            error={voice.error}
+            onClear={voice.reset}
+          />
+
+          {/* Form fields with clean Lucide SVG icons */}
           <View style={styles.fieldsSection}>
-            {input("nombre", "Nombre del producto", "tag-outline")}
-            {input("codigo", "Código", "barcode")}
-            {input("categoria", "Categoría", "shape-outline")}
-            {input("precio", "Precio (Bs)", "currency-usd", "decimal-pad")}
-            {input("cantidad", "Cantidad inicial", "package-variant-closed", "number-pad")}
+            {/* Nombre */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Nombre del producto"
+                value={values.nombre}
+                onChangeText={(value) => update("nombre", value)}
+                error={Boolean(errors.nombre)}
+                left={<TextInput.Icon icon={() => <Tag size={20} color={colors.primary} />} />}
+                placeholder="Ej: Jean Mom Fit Clásico Azul"
+              />
+              <HelperText type="error" visible={Boolean(errors.nombre)}>{errors.nombre}</HelperText>
+            </View>
+
+            {/* Código SKU */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Código SKU"
+                value={values.codigo}
+                onChangeText={(value) => update("codigo", value)}
+                error={Boolean(errors.codigo)}
+                autoCapitalize="characters"
+                left={<TextInput.Icon icon={() => <Barcode size={20} color={colors.primary} />} />}
+                placeholder="Ej: JEA-001"
+              />
+              <HelperText type="error" visible={Boolean(errors.codigo)}>{errors.codigo}</HelperText>
+            </View>
+
+            {/* Categoría con chips de acceso rápido */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Categoría"
+                value={values.categoria}
+                onChangeText={(value) => update("categoria", value)}
+                error={Boolean(errors.categoria)}
+                left={<TextInput.Icon icon={() => <Layers size={20} color={colors.primary} />} />}
+                placeholder="Elegí o escribí una categoría"
+              />
+              <View style={styles.categoryChipsContainer}>
+                {FASHION_CATEGORIES.map((cat) => {
+                  const isSelected = values.categoria.toLowerCase() === cat.toLowerCase();
+                  return (
+                    <Chip
+                      key={cat}
+                      compact
+                      selected={isSelected}
+                      showSelectedCheck={false}
+                      onPress={() => update("categoria", cat)}
+                      style={[styles.categoryChip, isSelected && styles.categoryChipSelected]}
+                      textStyle={[styles.categoryChipText, isSelected && styles.categoryChipTextSelected]}
+                    >
+                      {cat}
+                    </Chip>
+                  );
+                })}
+              </View>
+              <HelperText type="error" visible={Boolean(errors.categoria)}>{errors.categoria}</HelperText>
+            </View>
+
+            {/* Precio */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Precio (Bs)"
+                value={values.precio}
+                onChangeText={(value) => update("precio", value)}
+                keyboardType="decimal-pad"
+                error={Boolean(errors.precio)}
+                left={<TextInput.Icon icon={() => <DollarSign size={20} color={colors.primary} />} />}
+                placeholder="Ej: 180.00"
+              />
+              <HelperText type="error" visible={Boolean(errors.precio)}>{errors.precio}</HelperText>
+            </View>
+
+            {/* Cantidad inicial */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Cantidad inicial"
+                value={values.cantidad}
+                onChangeText={(value) => update("cantidad", value)}
+                keyboardType="number-pad"
+                error={Boolean(errors.cantidad)}
+                left={<TextInput.Icon icon={() => <Package size={20} color={colors.primary} />} />}
+                placeholder="Ej: 25"
+              />
+              <HelperText type="error" visible={Boolean(errors.cantidad)}>{errors.cantidad}</HelperText>
+            </View>
           </View>
 
-          {/* Branch selector */}
-          <Text variant="labelLarge" style={styles.label}>Sucursal</Text>
-          <View style={styles.chips}>
-            {branches.map((branch) => (
-              <Chip
-                key={branch.id}
-                selected={branch.id === sucursalId}
-                showSelectedCheck={false}
-                onPress={() => setSucursalId(branch.id)}
-                style={branch.id === sucursalId ? styles.chipSelected : styles.chip}
-                textStyle={branch.id === sucursalId ? styles.chipTextSelected : undefined}
-              >
-                {branch.nombre}
-              </Chip>
-            ))}
+          {/* Sucursal selector (clean badges layout) */}
+          <View style={styles.branchSection}>
+            <View style={styles.branchHeaderRow}>
+              <Store size={18} color={colors.textPrimary} />
+              <Text variant="labelLarge" style={styles.branchLabel}>
+                Sucursal de ingreso inicial
+              </Text>
+            </View>
+
+            <View style={styles.branchChipsGrid}>
+              {branches.map((branch) => {
+                const isSelected = branch.id === sucursalId;
+                const shortName = formatBranchName(branch.nombre);
+                return (
+                  <Chip
+                    key={branch.id}
+                    selected={isSelected}
+                    showSelectedCheck={false}
+                    icon={() =>
+                      isSelected ? (
+                        <Check size={16} color={colors.primary} />
+                      ) : (
+                        <Store size={14} color={colors.textSecondary} />
+                      )
+                    }
+                    onPress={() => setSucursalId(branch.id)}
+                    style={[styles.branchChip, isSelected && styles.branchChipSelected]}
+                    textStyle={[styles.branchChipText, isSelected && styles.branchChipTextSelected]}
+                  >
+                    {shortName}
+                  </Chip>
+                );
+              })}
+            </View>
+            <HelperText type="error" visible={Boolean(errors.sucursal_id)}>{errors.sucursal_id}</HelperText>
           </View>
-          <HelperText type="error" visible={Boolean(errors.sucursal_id)}>{errors.sucursal_id}</HelperText>
 
           {serverError ? <HelperText type="error" visible>{serverError}</HelperText> : null}
 
+          {/* Submit Button */}
           <Button
             mode="contained"
             onPress={submit}
             loading={loading}
             disabled={loading || branches.length === 0 || isVoiceBusy}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            icon="check-circle-outline"
+            style={styles.submitButton}
+            contentStyle={styles.submitButtonContent}
+            icon={() => <CheckCircle2 size={20} color={colors.white} />}
           >
-            Registrar producto
+            Registrar prenda en catálogo
           </Button>
         </Card.Content>
       </Card>
@@ -274,21 +501,37 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  container: {
+    padding: spacing.md,
+    paddingBottom: spacing.xxxl,
+  },
   card: {
-    borderRadius: radius.lg,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
     ...shadows.card,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
-  headerText: { flex: 1, marginRight: spacing.md },
-  title: { color: colors.textPrimary, fontWeight: "700" },
-  subtitle: { color: colors.textMuted, marginTop: 2 },
-  micContainer: {
+  headerText: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  title: {
+    color: colors.textPrimary,
+    fontWeight: "800",
+    fontSize: 22,
+  },
+  subtitle: {
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  micWrapper: {
     width: 56,
     height: 56,
     alignItems: "center",
@@ -296,44 +539,143 @@ const styles = StyleSheet.create({
   },
   pulseRing: {
     position: "absolute",
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#EF4444",
   },
   micButton: {
     borderRadius: 24,
     ...shadows.floating,
   },
+  aiToggleRow: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    marginBottom: spacing.sm,
+  },
+  examplesCard: {
+    backgroundColor: "#F8FAFC",
+    padding: spacing.md,
+    borderRadius: 14,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    gap: spacing.xs,
+  },
+  examplesTitle: {
+    color: colors.textSecondary,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  examplesList: {
+    gap: 6,
+  },
+  exampleChip: {
+    backgroundColor: colors.white,
+    borderColor: "#E2E8F0",
+    borderWidth: 1,
+  },
+  exampleChipText: {
+    fontSize: 12,
+    color: colors.textPrimary,
+  },
   statusBar: {
-    borderRadius: radius.md,
+    borderRadius: 14,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     marginBottom: spacing.md,
+    borderWidth: 1,
   },
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: spacing.xs,
   },
-  statusIcon: { margin: 0, marginRight: spacing.xs },
+  statusIconWrapper: {
+    marginRight: 4,
+  },
   transcript: {
     color: colors.textSecondary,
     fontStyle: "italic",
-    marginTop: spacing.xs,
-    marginLeft: spacing.xxl + spacing.sm,
+    marginTop: 4,
+    paddingLeft: 22,
   },
-  fieldsSection: { marginTop: spacing.xs },
-  field: { marginBottom: spacing.xs },
-  label: { marginTop: spacing.md, marginBottom: spacing.sm, color: colors.textPrimary },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  chip: {
-    backgroundColor: colors.surfaceSecondary,
+  fieldsSection: {
+    gap: 2,
   },
-  chipSelected: {
+  field: {
+    marginBottom: 4,
+  },
+  categoryChipsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  categoryChip: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: 8,
+  },
+  categoryChipSelected: {
     backgroundColor: colors.primarySoft,
     borderColor: colors.primary,
     borderWidth: 1,
   },
-  chipTextSelected: { color: colors.primary, fontWeight: "600" },
-  button: { marginTop: spacing.lg, borderRadius: radius.md },
-  buttonContent: { paddingVertical: spacing.xs },
+  categoryChipText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  categoryChipTextSelected: {
+    color: colors.primary,
+    fontWeight: "700",
+  },
+  branchSection: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  branchHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  branchLabel: {
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  branchChipsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
+  },
+  branchChip: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  branchChipSelected: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+  },
+  branchChipText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  branchChipTextSelected: {
+    color: colors.primary,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  submitButton: {
+    marginTop: spacing.xs,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    ...shadows.card,
+  },
+  submitButtonContent: {
+    height: 52,
+  },
 });
