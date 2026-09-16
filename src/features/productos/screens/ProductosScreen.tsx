@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, FlatList, StyleSheet, View } from "react-native";
+import { FlatList, StyleSheet, View } from "react-native";
 import { Plus, Search, X } from "lucide-react-native";
 import { Link, router, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Button, Searchbar, Text } from "react-native-paper";
@@ -7,19 +7,13 @@ import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
 import { colors, spacing } from "../../../shared/theme";
 import { ProductCard } from "../components/ProductCard";
-import { ProductDetailModal } from "../components/ProductDetailModal";
-import { ProductEditModal } from "../components/ProductEditModal";
 import { useProductos } from "../hooks/useProductos";
 import { useCategoriasProductos } from "../hooks/useCategoriasProductos";
-import { useActualizarProducto } from "../hooks/useActualizarProducto";
-import type { Producto } from "../../../shared/types/domain";
 
 export function ProductosScreen() {
   const [search, setSearch] = useState("");
   const [deferredSearch, setDeferredSearch] = useState("");
   const [category, setCategory] = useState<string | undefined>();
-  const [selectedProduct, setSelectedProduct] = useState<Producto | null>(null);
-  const [editingProduct, setEditingProduct] = useState<Producto | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDeferredSearch(search), 350);
@@ -28,7 +22,6 @@ export function ProductosScreen() {
 
   const query = useProductos({ q: deferredSearch || undefined, categoria: category });
   const categoriesQuery = useCategoriasProductos();
-  const updateMutation = useActualizarProducto();
 
   useFocusEffect(
     useCallback(() => {
@@ -49,7 +42,12 @@ export function ProductosScreen() {
         renderItem={({ item }) => (
           <ProductCard
             producto={item}
-            onPress={() => setSelectedProduct(item)}
+            onPress={() =>
+              router.push({
+                pathname: "/producto-detalle",
+                params: { id: String(item.id) },
+              })
+            }
           />
         )}
         contentContainerStyle={styles.content}
@@ -104,50 +102,6 @@ export function ProductosScreen() {
           </View>
         }
         ListFooterComponent={query.isFetchingNextPage ? <ActivityIndicator style={styles.footer} /> : null}
-      />
-
-      {/* Product Detail Modal (Stock per branch & Movement History) */}
-      <ProductDetailModal
-        visible={selectedProduct !== null}
-        producto={selectedProduct}
-        onDismiss={() => setSelectedProduct(null)}
-        onEdit={(prod) => {
-          setSelectedProduct(null);
-          setEditingProduct(prod);
-        }}
-        onTransfer={() => {
-          setSelectedProduct(null);
-          router.push("/movimientos");
-        }}
-      />
-
-      {/* Product Edit Modal */}
-      <ProductEditModal
-        visible={editingProduct !== null}
-        producto={editingProduct}
-        loading={updateMutation.isPending}
-        onDismiss={() => setEditingProduct(null)}
-        onSubmit={(id, params) => {
-          updateMutation.mutate(
-            { id, params },
-            {
-              onSuccess: (updated) => {
-                setEditingProduct(null);
-                void query.refetch();
-                Alert.alert(
-                  "Producto actualizado",
-                  `Se guardaron los cambios para "${updated.nombre}".`,
-                );
-              },
-              onError: (err) => {
-                Alert.alert(
-                  "Error al actualizar",
-                  err instanceof Error ? err.message : "No se pudo actualizar el producto.",
-                );
-              },
-            },
-          );
-        }}
       />
     </ScreenContainer>
   );

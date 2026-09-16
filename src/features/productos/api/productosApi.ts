@@ -81,6 +81,17 @@ export async function buscarProductoPorCodigo(codigo: string): Promise<Producto>
   return data as Producto;
 }
 
+export async function buscarProductoPorId(id: number): Promise<Producto> {
+  const productId = z.number().int().positive().parse(id);
+  const { data, error } = await supabase.from("productos").select("*").eq("id", productId).single();
+  if (error) {
+    if (error.code === "PGRST116") throw new ProductoNoEncontradoError();
+    throw new ProductoLookupError(error.message);
+  }
+  if (!data) throw new ProductoNoEncontradoError();
+  return data as Producto;
+}
+
 export async function obtenerCategoriasProductos(): Promise<string[]> {
   const rows = await fetchAllPages(async (from, to) => {
     const { data, error } = await supabase

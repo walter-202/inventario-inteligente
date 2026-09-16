@@ -22,7 +22,20 @@ test("feature-driven structure contains requested slices", () => {
 });
 
 test("routes stay free of direct Supabase queries", () => {
-  const routes = ["src/app/_layout.tsx", "src/app/(tabs)/index.tsx", "src/app/(tabs)/productos.tsx", "src/app/(tabs)/inventario.tsx", "src/app/(tabs)/ventas.tsx", "src/app/(tabs)/mas.tsx", "src/app/escanear.tsx", "src/app/registrar-producto.tsx", "src/app/movimientos.tsx", "src/app/nueva-venta.tsx", "src/app/registro-voz.tsx"];
+  const routes = [
+    "src/app/_layout.tsx",
+    "src/app/(tabs)/index.tsx",
+    "src/app/(tabs)/productos.tsx",
+    "src/app/(tabs)/inventario.tsx",
+    "src/app/(tabs)/ventas.tsx",
+    "src/app/(tabs)/mas.tsx",
+    "src/app/escanear.tsx",
+    "src/app/registrar-producto.tsx",
+    "src/app/movimientos.tsx",
+    "src/app/nueva-venta.tsx",
+    "src/app/registro-voz.tsx",
+    "src/app/producto-detalle.tsx",
+  ];
   for (const path of routes) assert.doesNotMatch(readFileSync(file(path), "utf8"), /supabase\.(from|rpc)\(/, path);
 });
 

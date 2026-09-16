@@ -42,6 +42,7 @@ function RootNavigator() {
         <Stack.Screen name="movimientos" />
         <Stack.Screen name="nueva-venta" />
         <Stack.Screen name="ajustes-ia" />
+        <Stack.Screen name="producto-detalle" />
       </Stack.Protected>
       <Stack.Protected guard={status !== "ready"}>
         <Stack.Screen name="sign-in" />
