@@ -17,13 +17,14 @@ interface ChatComposerProps {
   onSend: () => void;
   onVoiceMode: () => void;
   onRequestPermission?: () => void;
+  showSuggestions?: boolean;
 }
 
 const SUGERENCIAS = [
   "Vender 2 Jean Mom Fit",
+  "Registrar Blusa Seda SKU BLU-10 Bs 120 stock 15",
   "¿Cuánto stock queda de Jean Mom Fit?",
-  "¿Cuánto se vendió hoy?",
-  "Stock de Vestido Floral en San Miguel",
+  "¿Cuánto se vendió hoy en Central?",
   "Sino, corrige a 5 unidades",
 ];
 
@@ -44,6 +45,7 @@ export function ChatComposer({
   onSend,
   onVoiceMode,
   onRequestPermission,
+  showSuggestions = false,
 }: ChatComposerProps) {
   return (
     <View style={styles.box}>
@@ -57,7 +59,9 @@ export function ChatComposer({
           </Button>
         </View>
       ) : null}
-      <SuggestionChips suggestions={SUGERENCIAS} onSelect={onTranscriptChange} />
+      {showSuggestions ? (
+        <SuggestionChips suggestions={SUGERENCIAS} onSelect={onTranscriptChange} />
+      ) : null}
       <View style={styles.row}>
         <IconButton
           mode="contained-tonal"

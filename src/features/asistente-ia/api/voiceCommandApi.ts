@@ -8,6 +8,8 @@ import { obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
 import { obtenerDashboardMetrics } from "../../dashboard/api/dashboardApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
 
+import { interpretarRegistroProducto, type RegistroProductoParsed } from "./voiceRegistrationService";
+
 export class InterpretacionError extends Error { constructor(message: string) { super(message); this.name = "InterpretacionError"; } }
 
 /**
@@ -36,14 +38,15 @@ export interface StockSucursalDetalle {
 }
 
 export type ResultadoInterpretacion =
-  | { tipo: "aclaracion"; mensaje: string }
-  | { tipo: "registro_producto"; mensaje: string }
-  | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean }
+  | { tipo: "aclaracion"; mensaje: string; pasosPensamiento?: string[] }
+  | { tipo: "registro_producto"; datos: RegistroProductoParsed; mensaje: string; pasosPensamiento?: string[] }
+  | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean; pasosPensamiento?: string[] }
   | {
       tipo: "desambiguacion";
       texto: string;
       candidatos: Producto[];
       intento: IntentoDesambiguacion;
+      pasosPensamiento?: string[];
     }
   | {
       tipo: "consulta_stock";
@@ -52,6 +55,7 @@ export type ResultadoInterpretacion =
       desglose: StockSucursalDetalle[];
       stockTotal: number;
       mensaje: string;
+      pasosPensamiento?: string[];
     }
   | {
       tipo: "consulta_ventas";
@@ -60,6 +64,7 @@ export type ResultadoInterpretacion =
       cantidadVentas: number;
       periodo: string;
       mensaje: string;
+      pasosPensamiento?: string[];
     };
 
 type CoincidenciaProducto =
@@ -173,8 +178,20 @@ export async function consultarStockDe(
 
 export async function interpretarVoz(texto: string, contexto?: VozContexto): Promise<ResultadoInterpretacion> {
   const phrase = texto.trim();
-  if (!phrase) return { tipo: "aclaracion", mensaje: "Primero reconocé o escribí la operación que querés registrar." };
-  if (phrase.length > 500) return { tipo: "aclaracion", mensaje: "El texto reconocido es muy largo. Corregilo o reducilo y volvé a intentar." };
+  if (!phrase) {
+    return {
+      tipo: "aclaracion",
+      mensaje: "Primero reconocé o escribí la operación que querés registrar.",
+      pasosPensamiento: ["Mensaje vacío", "Esperando comando del usuario"],
+    };
+  }
+  if (phrase.length > 500) {
+    return {
+      tipo: "aclaracion",
+      mensaje: "El texto reconocido es muy largo. Corregilo o reducilo y volvé a intentar.",
+      pasosPensamiento: ["Texto excede longitud máxima", "Solicitando síntesis al usuario"],
+    };
+  }
 
   // Corrección con contexto ("sino corrige a 5", "mejor 3", "5"): reutiliza el
   // último producto y solo cambia la cantidad, sin pasar por la IA.
@@ -190,7 +207,16 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
       if (cantidad) {
         const product = await resolveProduct(contexto.ultimoProductoNombre);
         if (product) {
-          return { tipo: "venta", lineas: [{ producto: product, cantidadSolicitada: cantidad }], fueCorreccion: true };
+          return {
+            tipo: "venta",
+            lineas: [{ producto: product, cantidadSolicitada: cantidad }],
+            fueCorreccion: true,
+            pasosPensamiento: [
+              "Detectado marcador de corrección en lenguaje natural",
+              `Mantenido producto previo: ${product.nombre} (${product.codigo})`,
+              `Actualizada cantidad a: ${cantidad} unidades`,
+            ],
+          };
         }
       }
     }
@@ -208,7 +234,11 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
     const rawQuery = response.consulta?.producto?.trim() || response.productos?.[0]?.producto?.trim();
     const query = rawQuery ? limpiarNombreProducto(rawQuery) : "";
     if (!query) {
-      return { tipo: "aclaracion", mensaje: "¿De qué producto querés consultar el stock disponible?" };
+      return {
+        tipo: "aclaracion",
+        mensaje: "¿De qué producto querés consultar el stock disponible?",
+        pasosPensamiento: ["Detectada consulta de stock sin nombre de producto"],
+      };
     }
     const coincidencia = await resolverCoincidencia(query);
     if (coincidencia.kind === "candidatos") {
@@ -217,12 +247,25 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
         texto: query,
         candidatos: coincidencia.products,
         intento: { accion: "consulta_stock", sucursal: response.consulta?.sucursal ?? undefined },
+        pasosPensamiento: [
+          `Búsqueda de "${query}" en catálogo`,
+          `Múltiples opciones encontradas (${coincidencia.products.length} productos)`,
+          "Requiere selección para consultar stock exacto",
+        ],
       };
     }
     if (coincidencia.kind === "none") {
       throw new InterpretacionError(`No se encontró el producto "${query}". Corregí el nombre o indicá el código SKU.`);
     }
-    return consultarStockDe(coincidencia.product, response.consulta?.sucursal ?? undefined);
+    const stockResultado = await consultarStockDe(coincidencia.product, response.consulta?.sucursal ?? undefined);
+    return {
+      ...stockResultado,
+      pasosPensamiento: [
+        "Intención identificada: consulta de existencias",
+        `Producto resuelto: ${coincidencia.product.nombre} (${coincidencia.product.codigo})`,
+        `Consultado inventario en sucursales: ${stockResultado.stockTotal} unidades totales`,
+      ],
+    };
   }
 
   // 2. Sales inquiry
@@ -251,27 +294,61 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
       cantidadVentas: metrics.salesCount,
       periodo: "hoy",
       mensaje,
+      pasosPensamiento: [
+        "Intención identificada: resumen de ventas de la jornada",
+        `Filtro de sucursal: ${targetSucursalNombre || "Consolidado todas las sucursales"}`,
+        `Calculadas ${metrics.salesCount} ventas por Bs ${metrics.totalSales.toFixed(2)}`,
+      ],
     };
   }
 
-  // 2b. Catalog registration (dar de alta una prenda): no es venta, se redirige.
+  // 2b. Catalog registration (dar de alta una prenda)
   if (response.accion === "registro_producto") {
+    const datos = await interpretarRegistroProducto(phrase);
+    const camposExtraidos = [
+      datos.nombre ? `nombre "${datos.nombre}"` : null,
+      datos.codigo ? `SKU ${datos.codigo}` : null,
+      datos.categoria ? `categoría ${datos.categoria}` : null,
+      datos.precio !== null ? `precio Bs ${datos.precio}` : null,
+      datos.cantidad !== null ? `stock inicial ${datos.cantidad}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const mensaje = camposExtraidos
+      ? `Reconocí estos datos para el nuevo producto: ${camposExtraidos}. Podés confirmar el alta o completarla en el formulario.`
+      : "Detecté la intención de dar de alta un producto en catálogo. Revisá y confirmá los datos en la tarjeta a continuación:";
+
     return {
       tipo: "registro_producto",
-      mensaje:
-        "Eso es un alta de catálogo (nombre, código, precio y stock de una prenda nueva), no una venta. Te llevo a Registrar prenda, donde el micrófono autocompleta los campos.",
+      datos,
+      mensaje,
+      pasosPensamiento: [
+        "Detectada intención: alta de nuevo producto en catálogo",
+        `Entidades extraídas: ${camposExtraidos || "formulario limpio para completar"}`,
+        "Generada tarjeta de previsualización para confirmación humana obligatoria (RN-03)",
+      ],
     };
   }
 
   // 3. POS sale order
   if (response.accion === "venta") {
     const items = validateItems(response);
-    if (!items) return { tipo: "aclaracion", mensaje: "No se pudo identificar claramente la operación o los productos. Corregí el texto y volvé a intentar." };
+    if (!items) {
+      return {
+        tipo: "aclaracion",
+        mensaje: "No se pudo identificar claramente la operación o los productos. Corregí el texto y volvé a intentar.",
+        pasosPensamiento: ["Texto de venta ambiguo o sin productos estructurados"],
+      };
+    }
     const lines: LineaInterpretada[] = [];
     for (const item of items) {
       const nombreLimpio = limpiarNombreProducto(item.producto);
       if (!nombreLimpio) {
-        return { tipo: "aclaracion", mensaje: `Entendí la cantidad (${item.cantidad}) pero no el producto. Escribí el nombre o el código SKU, por ejemplo "Vender ${item.cantidad} Jean Mom Fit".` };
+        return {
+          tipo: "aclaracion",
+          mensaje: `Entendí la cantidad (${item.cantidad}) pero no el producto. Escribí el nombre o el código SKU, por ejemplo "Vender ${item.cantidad} Jean Mom Fit".`,
+          pasosPensamiento: [`Cantidad identificada (${item.cantidad}) pero falta nombre del producto`],
+        };
       }
       const coincidencia = await resolverCoincidencia(nombreLimpio);
       if (coincidencia.kind === "candidatos") {
@@ -280,12 +357,33 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
           texto: nombreLimpio,
           candidatos: coincidencia.products,
           intento: { accion: "venta", cantidad: item.cantidad },
+          pasosPensamiento: [
+            `Búsqueda textual: "${nombreLimpio}"`,
+            `Encontradas ${coincidencia.products.length} alternativas coincidentes en catálogo`,
+            "Esperando confirmación del producto específico",
+          ],
         };
       }
-      if (coincidencia.kind === "none") throw new InterpretacionError(`No se encontró el producto "${nombreLimpio}". Corregí el texto y volvé a intentar.`);
+      if (coincidencia.kind === "none") {
+        throw new InterpretacionError(`No se encontró el producto "${nombreLimpio}". Corregí el texto y volvé a intentar.`);
+      }
       lines.push({ producto: coincidencia.product, cantidadSolicitada: item.cantidad });
     }
-    return lines.length ? { tipo: "venta", lineas: lines } : { tipo: "aclaracion", mensaje: "No se pudo identificar ningún producto. Corregí el texto y volvé a intentar." };
+    return lines.length
+      ? {
+          tipo: "venta",
+          lineas: lines,
+          pasosPensamiento: [
+            `Intención identificada: orden de venta para ${lines.length} producto${lines.length === 1 ? "" : "s"}`,
+            ...lines.map((l) => `Resuelto: ${l.cantidadSolicitada} × ${l.producto.nombre} (${l.producto.codigo})`),
+            "Generando tarjeta de confirmación obligatoria con cálculo determinista (RN-03, RN-05)",
+          ],
+        }
+      : {
+          tipo: "aclaracion",
+          mensaje: "No se pudo identificar ningún producto. Corregí el texto y volvé a intentar.",
+          pasosPensamiento: ["No se encontraron productos coincidentes"],
+        };
   }
 
   return { tipo: "aclaracion", mensaje: "No se pudo identificar la operación. Podés registrar una venta, consultar el stock de una prenda o consultar las ventas de hoy." };

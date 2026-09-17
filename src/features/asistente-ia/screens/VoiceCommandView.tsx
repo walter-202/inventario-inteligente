@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Button, IconButton, Snackbar, Text } from "react-native-paper";
-import { Menu, Plus } from "lucide-react-native";
+import { Menu, Plus, Sparkles } from "lucide-react-native";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
 import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { useAuth } from "../../auth/hooks/useAuth";
+import { can } from "../../auth/lib/permissions";
 import { getPreferredMode, setPreferredMode, type PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { colors, spacing } from "../../../shared/theme";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
 import { useProcesarVenta } from "../../ventas/hooks/useProcesarVenta";
+import { useRegistrarProducto } from "../../productos/hooks/useRegistrarProducto";
 import { useVoiceCommand } from "../hooks/useVoiceCommand";
 import { aggregateVoiceLines } from "../lib/voiceLines";
 import {
@@ -28,13 +30,17 @@ import {
   type ResultadoInterpretacion,
 } from "../api/voiceCommandApi";
 import type { Producto } from "../../../shared/types/domain";
+import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 import { ChatMessageBubble } from "../components/ChatMessageBubble";
 import { CandidatePicker } from "../components/CandidatePicker";
 import { SaleConfirmationCard, type VentaConfirmationLine } from "../components/SaleConfirmationCard";
+import { ProductRegistrationCard } from "../components/ProductRegistrationCard";
+import { ThinkingTrace } from "../components/ThinkingTrace";
 import { ChatComposer } from "../components/ChatComposer";
 import { SessionBar } from "../components/SessionBar";
 import { SessionDrawer } from "../components/SessionDrawer";
 import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
+import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
 
 const RETRY_HINT = "Corregí el texto abajo y enviá de nuevo.";
 const SUGERENCIA_SKU = 'Probá con el código SKU (ej: JEAN-001) o "Vender 2 Jean Mom Fit".';
@@ -52,6 +58,8 @@ export function VoiceCommandView() {
   const branches = useSucursales();
   const stock = useStockMultiSucursal();
   const sale = useProcesarVenta();
+  const productMutation = useRegistrarProducto();
+  const canWriteProducts = can(profile?.rol, "products.write");
   const { requestConfirm, dialog: confirmDialog } = useConfirm();
   const [mode, setMode] = useState<PreferredMode>("auto");
   const cargarModo = useCallback(() => {
@@ -76,6 +84,7 @@ export function VoiceCommandView() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [branchId, setBranchId] = useState<number | null>(null);
   const [pendingConfirmation, setPendingConfirmation] = useState<VentaConfirmationLine[] | null>(null);
+  const [pendingRegistration, setPendingRegistration] = useState<RegistroProductoParsed | null>(null);
   const [shortage, setShortage] = useState<{ messageId: string; lines: LineaConStock[] } | null>(null);
   const [papelera, setPapelera] = useState<{ session: ChatSession; messages: ChatMessage[] } | null>(null);
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
@@ -124,7 +133,13 @@ export function VoiceCommandView() {
     if (objetivo !== "indefinido") dispatch({ type: "fijar-objetivo", sessionId, objetivo, updatedAt: ahora() });
   };
 
-  const procesarLineasVenta = (sessionId: string, lineas: LineaInterpretada[], fueCorreccion = false) => {
+  const procesarLineasVenta = (
+    sessionId: string,
+    lineas: LineaInterpretada[],
+    fueCorreccion = false,
+    thoughts?: string[],
+    durationMs?: number,
+  ) => {
     if (activeBranch === null) {
       agregar(sessionId, { role: "asistente", tone: "error", texto: `No hay sucursal activa para registrar la venta. ${RETRY_HINT}` });
       return;
@@ -159,6 +174,11 @@ export function VoiceCommandView() {
           role: "asistente",
           tone: "warning",
           texto: `No alcanza el stock en ${branchName}:\n${detail}\n¿Ajustamos a lo disponible o corregís la cantidad?`,
+          thoughts: [
+            `Verificación de stock en ${branchName}`,
+            `Insuficiente en ${faltantes.length} producto(s)`,
+            "Bloqueo preventivo de sobreventa activado (RN-01)",
+          ],
         },
         updatedAt: ahora(),
       });
@@ -178,8 +198,10 @@ export function VoiceCommandView() {
       role: "asistente",
       tone: "info",
       texto: fueCorreccion
-        ? `Tomé tu corrección: ${withStock.map((line) => `${line.cantidadSolicitada} × ${line.producto.nombre}`).join(", ")}. Revisá y confirmá.`
-        : `Entendí esto para ${branchName}. Revisá y confirmá, o tocá Corregir.`,
+        ? `Tomé tu corrección: ${withStock.map((line) => `${line.cantidadSolicitada} × ${line.producto.nombre}`).join(", ")}. Podés confirmar o cargar al carrito.`
+        : `Entendí esto para ${branchName}. Podés confirmar la venta directa o cargarla al carrito de ventas:`,
+      thoughts,
+      durationMs,
       attachment: { kind: "confirmacion-venta" },
     });
   };
@@ -205,7 +227,7 @@ export function VoiceCommandView() {
     agregar(sessionId, {
       role: "asistente",
       tone: "info",
-      texto: "Ajusté a lo disponible. Revisá y confirmá.",
+      texto: "Ajusté a lo disponible. Revisá y confirmá o cargá al carrito.",
       attachment: { kind: "confirmacion-venta" },
     });
   };
@@ -213,7 +235,13 @@ export function VoiceCommandView() {
   const elegirCandidato = async (sessionId: string, producto: Producto, intento: IntentoDesambiguacion) => {
     agregar(sessionId, { role: "usuario", texto: `Elegí ${producto.nombre} (${producto.codigo})` });
     if (intento.accion === "venta") {
-      procesarLineasVenta(sessionId, [{ producto, cantidadSolicitada: intento.cantidad }]);
+      procesarLineasVenta(
+        sessionId,
+        [{ producto, cantidadSolicitada: intento.cantidad }],
+        false,
+        [`Producto seleccionado: ${producto.nombre} (${producto.codigo})`],
+        150,
+      );
       return;
     }
     try {
@@ -222,6 +250,11 @@ export function VoiceCommandView() {
         role: "asistente",
         tone: "success",
         texto: consulta.mensaje,
+        thoughts: [
+          `Desambiguado a: ${producto.nombre} (${producto.codigo})`,
+          `Consultado stock en sucursales (${consulta.stockTotal} unidades)`,
+        ],
+        durationMs: 200,
         attachment: {
           kind: "consulta-stock",
           productoNombre: producto.nombre,
@@ -247,19 +280,40 @@ export function VoiceCommandView() {
     const sessionId = asegurarSesion();
     agregar(sessionId, { role: "usuario", texto });
     setPendingConfirmation(null);
+    setPendingRegistration(null);
     setShortage(null);
+    const startTime = Date.now();
     try {
       const contexto = lastLines[0] ? { ultimoProductoNombre: lastLines[0].producto.nombre } : undefined;
       const result: ResultadoInterpretacion = await voice.interpret(contexto);
+      const durationMs = Date.now() - startTime;
       if (result.tipo === "aclaracion") {
-        agregar(sessionId, { role: "asistente", tone: "info", texto: `${result.mensaje} ${RETRY_HINT}` });
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "info",
+          texto: `${result.mensaje} ${RETRY_HINT}`,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+        });
         return;
       }
       if (result.tipo === "registro_producto") {
         fijarObjetivo(sessionId, "registro");
-        agregar(sessionId, { role: "asistente", tone: "info", texto: result.mensaje });
-        dispatch({ type: "completar-sesion", sessionId, resumen: "Alta catálogo", updatedAt: ahora() });
-        router.replace("/registrar-producto");
+        setPendingRegistration(result.datos);
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "info",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: {
+            kind: "registro-producto",
+            datos: result.datos,
+            branchId: activeBranch ?? 1,
+            branchName,
+          },
+        });
+        voice.setTranscript("");
         return;
       }
       if (result.tipo === "consulta_stock" || result.tipo === "consulta_ventas") {
@@ -269,6 +323,8 @@ export function VoiceCommandView() {
             role: "asistente",
             tone: "success",
             texto: result.mensaje,
+            thoughts: result.pasosPensamiento,
+            durationMs,
             attachment: {
               kind: "consulta-stock",
               productoNombre: result.producto.nombre,
@@ -282,6 +338,8 @@ export function VoiceCommandView() {
             role: "asistente",
             tone: "success",
             texto: result.mensaje,
+            thoughts: result.pasosPensamiento,
+            durationMs,
             attachment: { kind: "consulta-ventas", totalVentas: result.totalVentas, cantidadVentas: result.cantidadVentas },
           });
           dispatch({
@@ -300,15 +358,22 @@ export function VoiceCommandView() {
           role: "asistente",
           tone: "info",
           texto: `Encontré ${result.candidatos.length} opciones para "${result.texto}". Elegí la correcta para seguir:`,
+          thoughts: result.pasosPensamiento,
+          durationMs,
           attachment: { kind: "candidatos", texto: result.texto, intento: result.intento, candidatos: result.candidatos },
         });
         return;
       }
       fijarObjetivo(sessionId, "venta");
-      procesarLineasVenta(sessionId, result.lineas, result.fueCorreccion);
+      procesarLineasVenta(sessionId, result.lineas, result.fueCorreccion, result.pasosPensamiento, durationMs);
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo interpretar la operación.";
-      agregar(sessionId, { role: "asistente", tone: "error", texto: `${message} ${SUGERENCIA_SKU}` });
+      agregar(sessionId, {
+        role: "asistente",
+        tone: "error",
+        texto: `${message} ${SUGERENCIA_SKU}`,
+        durationMs: Date.now() - startTime,
+      });
     }
   };
 
@@ -330,6 +395,10 @@ export function VoiceCommandView() {
             role: "asistente",
             tone: "success",
             texto: `Venta registrada en ${branchName}. ¿Registramos otra? Escribí o dictá la siguiente.`,
+            thoughts: [
+              `Venta transaccional asentada en sucursal ${branchName}`,
+              "Descuento atómico de stock ejecutado (cero sobreventa)",
+            ],
           });
           dispatch({ type: "completar-sesion", sessionId, resumen: resumen.slice(0, 80), updatedAt: ahora() });
           voice.setTranscript("");
@@ -345,6 +414,99 @@ export function VoiceCommandView() {
     );
   };
 
+  const cargarAlCarrito = () => {
+    const sessionId = chat.activeSessionId;
+    if (!pendingConfirmation || !sessionId) return;
+    establecerLotePendiente(
+      pendingConfirmation.map((line) => ({
+        producto: {
+          id: line.producto_id,
+          nombre: line.nombre,
+          codigo: "",
+          categoria: "",
+          precio: line.precio,
+          cantidad: line.cantidad,
+        },
+        cantidad: line.cantidad,
+      })),
+    );
+    const count = pendingConfirmation.reduce((sum, item) => sum + item.cantidad, 0);
+    agregar(sessionId, {
+      role: "asistente",
+      tone: "success",
+      texto: `Cargué ${count} prenda${count === 1 ? "" : "s"} al carrito de ventas en ${branchName}. Redirigiendo a pantalla de cobro...`,
+      thoughts: [
+        `Lote de ${pendingConfirmation.length} líneas enviado al carrito de ventas`,
+        `Sucursal destino: ${branchName}`,
+        "Redirigiendo a Punto de Venta...",
+      ],
+    });
+    dispatch({
+      type: "completar-sesion",
+      sessionId,
+      resumen: `Carrito ${count} prendas · ${branchName}`,
+      updatedAt: ahora(),
+    });
+    setPendingConfirmation(null);
+    voice.setTranscript("");
+    router.push("/nueva-venta");
+  };
+
+  const confirmarAltaProducto = (input: {
+    nombre: string;
+    codigo: string;
+    categoria: string;
+    precio: number;
+    cantidad: number;
+    sucursal_id: number;
+  }) => {
+    const sessionId = chat.activeSessionId;
+    if (!sessionId || productMutation.isPending) return;
+    productMutation.mutate(
+      {
+        nombre: input.nombre,
+        codigo: input.codigo,
+        categoria: input.categoria,
+        precio: input.precio,
+        cantidad: input.cantidad,
+        sucursal_id: input.sucursal_id,
+      },
+      {
+        onSuccess: (creado) => {
+          setPendingRegistration(null);
+          agregar(sessionId, {
+            role: "asistente",
+            tone: "success",
+            texto: `✅ Prenda "${creado.producto.nombre}" (${creado.producto.codigo}) registrada en catálogo con ${creado.cantidad_inicial} unidades iniciales en ${branchName}.`,
+            thoughts: [
+              "Inserción en base de datos central Supabase exitosa",
+              `Asignado stock inicial a sucursal ${branchName}`,
+              "Caché de catálogo e inventario invalidada",
+            ],
+          });
+          dispatch({
+            type: "completar-sesion",
+            sessionId,
+            resumen: `Alta ${creado.producto.nombre} · ${creado.producto.codigo}`,
+            updatedAt: ahora(),
+          });
+        },
+        onError: (err) => {
+          agregar(sessionId, {
+            role: "asistente",
+            tone: "error",
+            texto: `${err instanceof Error ? err.message : "No se pudo registrar el producto."} Corregí los datos e intentá nuevamente.`,
+          });
+        },
+      },
+    );
+  };
+
+  const abrirFormularioAlta = () => {
+    setPendingRegistration(null);
+    router.push("/registrar-producto");
+  };
+
   const cancelarConfirmacion = () => {
     const sessionId = chat.activeSessionId;
     setPendingConfirmation(null);
@@ -354,6 +516,7 @@ export function VoiceCommandView() {
   const nuevaSesion = () => {
     setInspectingId(null);
     setPendingConfirmation(null);
+    setPendingRegistration(null);
     setShortage(null);
     setDrawerOpen(false);
     const session: ChatSession = {
@@ -470,9 +633,57 @@ export function VoiceCommandView() {
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
         >
           {visibleMessages.length === 0 ? (
-            <Text variant="bodyMedium" style={styles.empty}>
-              Preguntá por stock, dictá una venta o consultá las ventas de hoy. Si digo “chompas” y hay varias, te muestro los SKUs para que elijas.
-            </Text>
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyHero}>
+                <View style={styles.emptyIconCircle}>
+                  <Sparkles size={26} color={colors.primary} />
+                </View>
+                <Text variant="titleMedium" style={styles.emptyTitle}>
+                  ¡Hola{primerNombre ? `, ${primerNombre}` : ""}!
+                </Text>
+                <Text variant="bodySmall" style={styles.emptySubtitle}>
+                  Soy el asistente inteligente de Lidemoda. Dictá o escribí lo que necesitás hacer:
+                </Text>
+              </View>
+              <View style={styles.emptyCardsGrid}>
+                <TouchableOpacity
+                  style={styles.featureCard}
+                  activeOpacity={0.7}
+                  onPress={() => voice.setTranscript("Vender 2 Jean Mom Fit")}
+                >
+                  <Text style={styles.featureCardEmoji}>🛍️</Text>
+                  <Text variant="labelMedium" style={styles.featureCardTitle}>Vender prendas</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Vender 2 Jean Mom Fit"</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.featureCard}
+                  activeOpacity={0.7}
+                  onPress={() => voice.setTranscript("¿Cuánto stock queda de Jean Mom Fit?")}
+                >
+                  <Text style={styles.featureCardEmoji}>📦</Text>
+                  <Text variant="labelMedium" style={styles.featureCardTitle}>Consultar stock</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Stock en sucursales"</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.featureCard}
+                  activeOpacity={0.7}
+                  onPress={() => voice.setTranscript("Registrar Blusa Seda SKU BLU-10 Bs 120 stock 15")}
+                >
+                  <Text style={styles.featureCardEmoji}>👗</Text>
+                  <Text variant="labelMedium" style={styles.featureCardTitle}>Alta de prenda</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Registrar nuevo producto"</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.featureCard}
+                  activeOpacity={0.7}
+                  onPress={() => voice.setTranscript("¿Cuánto se vendió hoy en Central?")}
+                >
+                  <Text style={styles.featureCardEmoji}>📊</Text>
+                  <Text variant="labelMedium" style={styles.featureCardTitle}>Ventas del día</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Resumen de hoy"</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           ) : (
             visibleMessages.map((message) => {
               const candidatos = message.attachment?.kind === "candidatos" ? message.attachment : null;
@@ -502,6 +713,19 @@ export function VoiceCommandView() {
                     loading={sale.isPending}
                     onConfirm={confirmarVenta}
                     onCancel={cancelarConfirmacion}
+                    onSendToCart={cargarAlCarrito}
+                  />
+                ) : null}
+                {message.attachment?.kind === "registro-producto" && pendingRegistration && visibleSessionId && !inspectingId ? (
+                  <ProductRegistrationCard
+                    initialData={pendingRegistration}
+                    branchName={message.attachment.branchName}
+                    branchId={message.attachment.branchId}
+                    loading={productMutation.isPending}
+                    canWrite={canWriteProducts}
+                    onConfirm={confirmarAltaProducto}
+                    onOpenForm={abrirFormularioAlta}
+                    onCancel={() => setPendingRegistration(null)}
                   />
                 ) : null}
                 {message.attachment?.kind === "consulta-stock" ? (
@@ -530,6 +754,11 @@ export function VoiceCommandView() {
               );
             })
           )}
+          {voice.interpreting ? (
+            <View style={styles.thinkingActiveBox}>
+              <ThinkingTrace isActive activeStatusText="Analizando consulta y existencias..." />
+            </View>
+          ) : null}
         </ScrollView>
         {inspectingId ? null : (
           <ChatComposer
@@ -545,6 +774,7 @@ export function VoiceCommandView() {
             onSend={() => void enviar()}
             onVoiceMode={abrirModoVoz}
             onRequestPermission={voice.requestPermission}
+            showSuggestions={visibleMessages.length === 0}
           />
         )}
         <SessionDrawer
@@ -600,6 +830,65 @@ const styles = StyleSheet.create({
   inspectText: { flex: 1, color: colors.primary },
   messages: { flex: 1 },
   messagesContent: { gap: spacing.sm, paddingVertical: spacing.xs },
+  emptyContainer: {
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+  },
+  emptyHero: {
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
+  },
+  emptyIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(224, 76, 56, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontWeight: "800",
+    color: colors.textPrimary,
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    color: colors.textSecondary,
+    textAlign: "center",
+    maxWidth: 320,
+    lineHeight: 18,
+  },
+  emptyCardsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs + 2,
+    justifyContent: "space-between",
+  },
+  featureCard: {
+    width: "48%",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: spacing.sm,
+    gap: 2,
+  },
+  featureCardEmoji: {
+    fontSize: 20,
+    marginBottom: 2,
+  },
+  featureCardTitle: {
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  featureCardDesc: {
+    color: colors.textSecondary,
+    fontSize: 11,
+  },
+  thinkingActiveBox: {
+    paddingVertical: spacing.xs,
+  },
   empty: { color: colors.textSecondary, lineHeight: 22 },
   queryCard: {
     backgroundColor: colors.surface,

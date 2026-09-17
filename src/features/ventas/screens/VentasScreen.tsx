@@ -18,7 +18,13 @@ import { SaleCart, type CartItem } from "../components/SaleCart";
 import { SaleSummaryModal } from "../components/SaleSummaryModal";
 import { useProcesarVenta } from "../hooks/useProcesarVenta";
 import { useVentas } from "../hooks/useVentas";
-import { limpiarProductoPendiente, peekProductoPendiente } from "../lib/pendienteVenta";
+import {
+  limpiarLotePendiente,
+  limpiarProductoPendiente,
+  peekLotePendiente,
+  peekProductoPendiente,
+  type ItemPendienteVenta,
+} from "../lib/pendienteVenta";
 import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 import { useAuth } from "../../auth/hooks/useAuth";
 import { can } from "../../auth/lib/permissions";
@@ -41,6 +47,7 @@ function VentasContent() {
   const [payment, setPayment] = useState<PaymentMethod>("efectivo");
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [pendingProduct, setPendingProduct] = useState<Producto | null>(null);
+  const [pendingBatch, setPendingBatch] = useState<ItemPendienteVenta[] | null>(null);
   const [pendingStockSnapshot, setPendingStockSnapshot] = useState<InventarioItem[] | null>(null);
   const [lineaBorrada, setLineaBorrada] = useState<{ item: CartItem; index: number } | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -64,6 +71,7 @@ function VentasContent() {
 
   const refreshForScreen = useCallback(async () => {
     setPendingProduct(null);
+    setPendingBatch(null);
     setPendingStockSnapshot(null);
     setRefreshError(null);
 
@@ -84,9 +92,11 @@ function VentasContent() {
       }
 
       const pending = peekProductoPendiente();
-      if (pending) {
+      const pendingItems = peekLotePendiente();
+      if (pending || pendingItems.length > 0) {
         setPendingStockSnapshot(stockResult.data);
-        setPendingProduct(pending);
+        if (pending) setPendingProduct(pending);
+        if (pendingItems.length > 0) setPendingBatch(pendingItems);
       }
     } catch {
       setRefreshError("No se pudo actualizar el inventario. El producto escaneado se conservará para reintentar.");
@@ -131,16 +141,58 @@ function VentasContent() {
     [stock.data, stockFor],
   );
 
-  useEffect(() => {
-    if (!pendingProduct || !pendingStockSnapshot || selectedBranch === null) return;
+  const addProductsBatch = useCallback(
+    (itemsToAdd: ItemPendienteVenta[], inventory: InventarioItem[] = stock.data ?? []) => {
+      setCart((currentItems) => {
+        const updated = [...currentItems];
+        for (const item of itemsToAdd) {
+          const available = stockFor(item.producto.id, inventory);
+          if (available <= 0) continue;
+          const targetQty = Math.min(Math.max(1, item.cantidad), available);
+          const existingIndex = updated.findIndex((cartItem) => cartItem.producto.id === item.producto.id);
+          if (existingIndex >= 0) {
+            const currentQty = updated[existingIndex]!.cantidad;
+            updated[existingIndex] = {
+              ...updated[existingIndex]!,
+              cantidad: Math.min(currentQty + targetQty, available),
+              stock: available,
+            };
+          } else {
+            updated.push({
+              producto: item.producto,
+              cantidad: targetQty,
+              stock: available,
+            });
+          }
+        }
+        return updated;
+      });
+      setSearch("");
+      setDeferredSearch("");
+    },
+    [stock.data, stockFor],
+  );
 
-    addProduct(pendingProduct, pendingStockSnapshot);
-    if (peekProductoPendiente()?.id === pendingProduct.id) {
-      limpiarProductoPendiente();
+  useEffect(() => {
+    if ((!pendingProduct && (!pendingBatch || pendingBatch.length === 0)) || !pendingStockSnapshot || selectedBranch === null) return;
+
+    if (pendingProduct) {
+      addProduct(pendingProduct, pendingStockSnapshot);
+      if (peekProductoPendiente()?.id === pendingProduct.id) {
+        limpiarProductoPendiente();
+      }
+      setPendingProduct(null);
     }
-    setPendingProduct(null);
+
+    if (pendingBatch && pendingBatch.length > 0) {
+      addProductsBatch(pendingBatch, pendingStockSnapshot);
+      limpiarLotePendiente();
+      setPendingBatch(null);
+    }
+
     setPendingStockSnapshot(null);
-  }, [addProduct, pendingProduct, pendingStockSnapshot, selectedBranch]);
+  }, [addProduct, addProductsBatch, pendingProduct, pendingBatch, pendingStockSnapshot, selectedBranch]);
+
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.producto.precio * item.cantidad, 0),

@@ -1,4 +1,5 @@
 import type { Producto } from "../../../shared/types/domain";
+import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 
 /**
  * Chat conversacional del asistente con sesiones de vida corta.
@@ -28,6 +29,7 @@ export interface StockRow {
 export type ChatAttachment =
   | { kind: "candidatos"; texto: string; intento: IntentoDesambiguacion; candidatos: Producto[] }
   | { kind: "confirmacion-venta" }
+  | { kind: "registro-producto"; datos: RegistroProductoParsed; branchId: number; branchName: string }
   | { kind: "consulta-stock"; productoNombre: string; filas: StockRow[]; total: number }
   | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number };
 
@@ -37,6 +39,8 @@ export interface ChatMessage {
   texto: string;
   tone?: ChatTone;
   attachment?: ChatAttachment;
+  thoughts?: string[];
+  durationMs?: number;
 }
 
 export type ObjetivoSesion = "venta" | "consulta" | "registro" | "indefinido";

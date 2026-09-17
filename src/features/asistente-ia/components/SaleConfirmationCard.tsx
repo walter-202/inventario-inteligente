@@ -16,10 +16,11 @@ interface SaleConfirmationCardProps {
   loading: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  onSendToCart?: () => void;
 }
 
 /** Previsualización obligatoria antes de registrar la venta (RN-03). */
-export function SaleConfirmationCard({ branchName, lines, loading, onConfirm, onCancel }: SaleConfirmationCardProps) {
+export function SaleConfirmationCard({ branchName, lines, loading, onConfirm, onCancel, onSendToCart }: SaleConfirmationCardProps) {
   const total = lines.reduce((sum, line) => sum + line.cantidad * line.precio, 0);
   return (
     <View style={styles.card}>
@@ -44,11 +45,16 @@ export function SaleConfirmationCard({ branchName, lines, loading, onConfirm, on
         </Text>
       </View>
       <View style={styles.actions}>
-        <Button onPress={onCancel} disabled={loading}>
+        <Button onPress={onCancel} disabled={loading} compact>
           Corregir
         </Button>
-        <Button mode="contained" onPress={onConfirm} loading={loading} disabled={loading}>
-          Confirmar
+        {onSendToCart ? (
+          <Button mode="outlined" onPress={onSendToCart} disabled={loading} compact>
+            Cargar al Carrito
+          </Button>
+        ) : null}
+        <Button mode="contained" onPress={onConfirm} loading={loading} disabled={loading} compact>
+          Confirmar Venta
         </Button>
       </View>
     </View>
