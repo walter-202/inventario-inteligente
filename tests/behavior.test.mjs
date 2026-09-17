@@ -430,3 +430,86 @@ test("product update schema validates editable fields and rejects invalid prices
   // Rejects NaN price
   assert.equal(ActualizarProductoSchema.safeParse({ ...valid, precio: Number.NaN }).success, false);
 });
+
+test("pending sales store queues and consumes batch items with quantities", () => {
+  const {
+    establecerLotePendiente,
+    peekLotePendiente,
+    tomarLotePendiente,
+    limpiarLotePendiente,
+  } = loadTsModule("src/features/ventas/lib/pendienteVenta.ts");
+
+  limpiarLotePendiente();
+  assert.deepEqual(peekLotePendiente(), []);
+
+  const p1 = { id: 10, nombre: "P1", codigo: "SKU-10", categoria: "Ropa", precio: 100, cantidad: 50 };
+  const p2 = { id: 20, nombre: "P2", codigo: "SKU-20", categoria: "Ropa", precio: 150, cantidad: 30 };
+  establecerLotePendiente([
+    { producto: p1, cantidad: 2 },
+    { producto: p2, cantidad: 3 },
+  ]);
+
+  const peeked = peekLotePendiente();
+  assert.equal(peeked.length, 2);
+  assert.equal(peeked[0].cantidad, 2);
+  assert.equal(peeked[1].cantidad, 3);
+
+  const taken = tomarLotePendiente();
+  assert.equal(taken.length, 2);
+  assert.deepEqual(peekLotePendiente(), []);
+});
+
+test("chat session message stores thoughts array and durationMs", () => {
+  const { chatReducer, chatInicial } = loadTsModule("src/features/asistente-ia/lib/chatSession.ts");
+  const session = {
+    id: "s-test",
+    objetivo: "registro",
+    estado: "activa",
+    resumen: null,
+    createdAt: 1000,
+    updatedAt: 1000,
+  };
+  let state = chatReducer(chatInicial, { type: "nueva-sesion", session });
+  state = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "s-test",
+    message: {
+      id: "m-1",
+      role: "asistente",
+      texto: "Revisá los datos del nuevo producto",
+      thoughts: ["Paso 1: Entidad extraída", "Paso 2: Validación de stock"],
+      durationMs: 450,
+      attachment: {
+        kind: "registro-producto",
+        datos: { nombre: "Blusa", codigo: "BLU-1", categoria: "Ropa", precio: 50, cantidad: 10 },
+        branchId: 1,
+        branchName: "Central",
+      },
+    },
+    updatedAt: 1050,
+  });
+
+  const msg = state.messages["s-test"][0];
+  assert.equal(msg.thoughts.length, 2);
+  assert.equal(msg.durationMs, 450);
+  assert.equal(msg.attachment.kind, "registro-producto");
+  assert.equal(msg.attachment.datos.nombre, "Blusa");
+});
+
+test("barcode registration preserves scanned code in product schema validation", () => {
+  const { ProductoInputSchema } = loadTsModule("src/features/productos/api/productosApi.ts");
+  const scannedCode = "7751234567890";
+  const input = {
+    nombre: "Jean Clásico Azul",
+    codigo: scannedCode,
+    categoria: "Pantalones",
+    precio: 120,
+    cantidad: 15,
+    sucursal_id: 1,
+  };
+  const parsed = ProductoInputSchema.safeParse(input);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.codigo, "7751234567890");
+});
+
+

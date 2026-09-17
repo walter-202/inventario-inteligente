@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, ScrollView, StyleSheet, View } from "react-native";
+import { router } from "expo-router";
 import { Button, Card, Chip, HelperText, IconButton, Surface, Text, TextInput } from "react-native-paper";
 import {
   Tag,
   Barcode,
+  ScanBarcode,
   Layers,
   DollarSign,
   Package,
@@ -153,16 +155,29 @@ interface ProductFormProps {
   resetToken?: number;
   loading?: boolean;
   serverError?: string | null;
+  initialValues?: Partial<NuevoProductoParams>;
   onSubmit: (input: NuevoProductoParams) => void;
 }
 
 type Field = "nombre" | "codigo" | "categoria" | "precio" | "cantidad" | "sucursal_id";
 
-export function ProductForm({ branches, resetToken = 0, loading = false, serverError, onSubmit }: ProductFormProps) {
-  const [values, setValues] = useState({ nombre: "", codigo: "", categoria: "", precio: "", cantidad: "" });
+export function ProductForm({ branches, resetToken = 0, loading = false, serverError, initialValues, onSubmit }: ProductFormProps) {
+  const [values, setValues] = useState({
+    nombre: initialValues?.nombre ?? "",
+    codigo: initialValues?.codigo ?? "",
+    categoria: initialValues?.categoria ?? "",
+    precio: initialValues?.precio !== undefined ? String(initialValues.precio) : "",
+    cantidad: initialValues?.cantidad !== undefined ? String(initialValues.cantidad) : "",
+  });
   const [sucursalId, setSucursalId] = useState<number | null>(branches[0]?.id ?? null);
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [showExamples, setShowExamples] = useState(false);
+
+  useEffect(() => {
+    if (initialValues?.codigo) {
+      setValues((prev) => ({ ...prev, codigo: initialValues.codigo! }));
+    }
+  }, [initialValues?.codigo]);
 
   const voice = useVoiceRegistration();
   const pulse = usePulse(voice.state === "listening");
@@ -379,7 +394,14 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
                 error={Boolean(errors.codigo)}
                 autoCapitalize="characters"
                 left={<TextInput.Icon icon={() => <Barcode size={20} color={colors.primary} />} />}
-                placeholder="Ej: JEA-001"
+                right={
+                  <TextInput.Icon
+                    icon={() => <ScanBarcode size={20} color={colors.primary} />}
+                    onPress={() => router.push({ pathname: "/escanear", params: { mode: "registro" } })}
+                    accessibilityLabel="Escanear código de barras con la cámara"
+                  />
+                }
+                placeholder="Ej: JEA-001 o tocá para escanear"
               />
               <HelperText type="error" visible={Boolean(errors.codigo)}>{errors.codigo}</HelperText>
             </View>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useRegistrarProducto } from "../hooks/useRegistrarProducto";
@@ -18,6 +18,7 @@ export function RegistrarProductoScreen() {
 }
 
 function RegistrarProductoForm() {
+  const { codigo } = useLocalSearchParams<{ codigo?: string }>();
   const { activeBranchId, canChangeBranch } = useActiveBranch();
   const branches = useSucursales();
   const mutation = useRegistrarProducto();
@@ -35,5 +36,16 @@ function RegistrarProductoForm() {
     );
   }, [mutation.data, mutation.isSuccess, mutation.reset]);
   const availableBranches = canChangeBranch ? branches.data ?? [] : (branches.data ?? []).filter((branch) => branch.id === activeBranchId);
-  return <ScreenContainer><ProductForm resetToken={resetToken} branches={availableBranches} loading={mutation.isPending} serverError={mutation.error ? extraerMensajeError(mutation.error, "No se pudo registrar el producto.") : null} onSubmit={(input) => mutation.mutate(input)} /></ScreenContainer>;
+  return (
+    <ScreenContainer>
+      <ProductForm
+        resetToken={resetToken}
+        branches={availableBranches}
+        initialValues={codigo ? { codigo } : undefined}
+        loading={mutation.isPending}
+        serverError={mutation.error ? extraerMensajeError(mutation.error, "No se pudo registrar el producto.") : null}
+        onSubmit={(input) => mutation.mutate(input)}
+      />
+    </ScreenContainer>
+  );
 }
