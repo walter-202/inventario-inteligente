@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
-import { Menu, TextInput } from "react-native-paper";
+import { StyleSheet, View } from "react-native";
+import { Menu, Text, TouchableRipple } from "react-native-paper";
 import { Check, ChevronDown, Store } from "lucide-react-native";
 import { formatBranchName } from "../lib/branchNames";
 import { colors, spacing } from "../theme";
@@ -57,21 +57,26 @@ export function BranchSelect({
       visible={visible}
       onDismiss={() => setVisible(false)}
       anchor={
-        <Pressable onPress={() => !isDisabled && setVisible(true)} accessibilityRole="button">
-          <View pointerEvents="none">
-            <TextInput
-              mode="outlined"
-              dense
-              label={label}
-              value={display}
-              placeholder={empty ? "Sin sucursales" : placeholder}
-              editable={false}
-              disabled={isDisabled}
-              left={<TextInput.Icon icon={() => <Store size={18} color={colors.textSecondary} />} />}
-              right={<TextInput.Icon icon={() => <ChevronDown size={20} color={colors.textSecondary} />} />}
-            />
+        <TouchableRipple
+          onPress={() => !isDisabled && setVisible(true)}
+          disabled={isDisabled}
+          style={[styles.field, isDisabled && styles.fieldDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}: ${display || placeholder}`}
+        >
+          <View pointerEvents="none" style={styles.fieldInner}>
+            <Store size={18} color={isDisabled ? colors.textMuted : colors.textSecondary} />
+            <View style={styles.fieldCopy}>
+              <Text variant="labelSmall" style={styles.fieldLabel}>
+                {label}
+              </Text>
+              <Text variant="bodyLarge" style={[styles.fieldValue, !display && styles.fieldPlaceholder]} numberOfLines={1}>
+                {display || (empty ? "Sin sucursales" : placeholder)}
+              </Text>
+            </View>
+            <ChevronDown size={20} color={colors.textSecondary} />
           </View>
-        </Pressable>
+        </TouchableRipple>
       }
       contentStyle={styles.menu}
     >
@@ -100,4 +105,18 @@ export function BranchSelect({
 const styles = StyleSheet.create({
   menu: { minWidth: 220 },
   iconSpacer: { width: spacing.lg },
+  field: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+  },
+  fieldDisabled: { opacity: 0.6 },
+  fieldInner: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  fieldCopy: { flex: 1, gap: 0 },
+  fieldLabel: { color: colors.textSecondary },
+  fieldValue: { color: colors.textPrimary },
+  fieldPlaceholder: { color: colors.textMuted },
 });
