@@ -1,7 +1,10 @@
-import { Bell, ChevronDown, Package } from "lucide-react-native";
+import { Bell, ChevronDown, Menu, Package } from "lucide-react-native";
 import { Pressable, StyleSheet, View } from "react-native";
 import { IconButton, Text, useTheme } from "react-native-paper";
+import { useNavigation } from "expo-router";
 import { colors, spacing } from "../theme";
+
+import { useAppDrawer } from "./DrawerContext";
 
 interface AppHeaderProps {
   title: string;
@@ -9,16 +12,47 @@ interface AppHeaderProps {
   branchName?: string;
   onBranchPress?: () => void;
   onNotificationPress?: () => void;
+  showMenuButton?: boolean;
+  onMenuPress?: () => void;
 }
 
-export function AppHeader({ title, subtitle, branchName, onBranchPress, onNotificationPress }: AppHeaderProps) {
+export function AppHeader({
+  title,
+  subtitle,
+  branchName,
+  onBranchPress,
+  onNotificationPress,
+  showMenuButton = true,
+  onMenuPress,
+}: AppHeaderProps) {
   const theme = useTheme();
+  const navigation = useNavigation<any>();
+  const { openDrawer } = useAppDrawer();
+
+  const handleMenuPress = onMenuPress ?? (() => {
+    openDrawer();
+    if (typeof navigation?.openDrawer === "function") {
+      navigation.openDrawer();
+    }
+  });
+
   return (
     <View style={styles.container}>
       <View style={styles.brandRow}>
-        <View style={[styles.icon, { backgroundColor: theme.colors.primaryContainer }]}>
-          <Package size={20} color={theme.colors.primary} />
-        </View>
+        {showMenuButton ? (
+          <Pressable
+            style={[styles.icon, { backgroundColor: theme.colors.primaryContainer }]}
+            onPress={handleMenuPress}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir menú lateral"
+          >
+            <Menu size={20} color={theme.colors.primary} />
+          </Pressable>
+        ) : (
+          <View style={[styles.icon, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Package size={20} color={theme.colors.primary} />
+          </View>
+        )}
         <View style={styles.copy}>
           <Text variant="titleLarge" style={styles.title}>{title}</Text>
           {subtitle ? <Text variant="bodySmall" style={styles.subtitle}>{subtitle}</Text> : null}

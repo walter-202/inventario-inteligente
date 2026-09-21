@@ -5,7 +5,8 @@ import { useEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PaperProvider } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Check, ChevronDown, ChevronUp, Eye, EyeOff, X } from "lucide-react-native";
+import { AlertCircle, ArrowLeft, Check, ChevronDown, ChevronUp, Eye, EyeOff, Search, X } from "lucide-react-native";
+import { View } from "react-native";
 import { paperTheme } from "../shared/theme";
 import { queryClient } from "../shared/lib/queryClient";
 import { SessionProvider, useAuth } from "../features/auth/hooks/useAuth";
@@ -20,6 +21,8 @@ function renderPaperIcon(props: { name: string; color?: string; size: number }) 
     case "close":
     case "x":
       return <X size={props.size} color={iconColor} />;
+    case "magnify":
+      return <Search size={props.size} color={iconColor} />;
     case "eye":
       return <Eye size={props.size} color={iconColor} />;
     case "eye-off":
@@ -28,10 +31,16 @@ function renderPaperIcon(props: { name: string; color?: string; size: number }) 
       return <ChevronDown size={props.size} color={iconColor} />;
     case "menu-up":
       return <ChevronUp size={props.size} color={iconColor} />;
+    case "arrow-left":
+      return <ArrowLeft size={props.size} color={iconColor} />;
+    case "alert-circle":
+      return <AlertCircle size={props.size} color={iconColor} />;
     default:
-      return null;
+      return <View style={{ width: props.size, height: props.size }} />;
   }
 }
+
+import { AppDrawerProvider } from "../shared/components/AppDrawerProvider";
 
 export default function RootLayout() {
   return (
@@ -39,7 +48,9 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <PaperProvider theme={paperTheme} settings={{ icon: renderPaperIcon }}>
           <SessionProvider>
-            <RootNavigator />
+            <AppDrawerProvider>
+              <RootNavigator />
+            </AppDrawerProvider>
           </SessionProvider>
         </PaperProvider>
       </QueryClientProvider>
