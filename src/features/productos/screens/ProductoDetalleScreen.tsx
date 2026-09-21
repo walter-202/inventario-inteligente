@@ -113,9 +113,17 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
               <View style={styles.metaBadge}>
                 <Barcode size={14} color={colors.textSecondary} />
                 <Text variant="labelSmall" style={styles.metaBadgeText}>
-                  {producto.codigo}
+                  SKU: {producto.codigo}
                 </Text>
               </View>
+              {producto.codigo_barra ? (
+                <View style={[styles.metaBadge, { backgroundColor: colors.primarySoft }]}>
+                  <Barcode size={14} color={colors.primary} />
+                  <Text variant="labelSmall" style={[styles.metaBadgeText, { color: colors.primary, fontWeight: "700" }]}>
+                    EAN: {producto.codigo_barra}
+                  </Text>
+                </View>
+              ) : null}
               <View style={styles.metaBadge}>
                 <Tag size={14} color={colors.textSecondary} />
                 <Text variant="labelSmall" style={styles.metaBadgeText}>

@@ -2,7 +2,9 @@ export interface Producto {
   id: number;
   nombre: string;
   codigo: string;
+  codigo_barra?: string | null;
   categoria: string;
+  subcategoria?: string | null;
   precio: number;
   cantidad: number;
   stock_minimo?: number;
@@ -22,7 +24,9 @@ export interface ProductosParams { q?: string; categoria?: string; page?: number
 export interface NuevoProductoParams {
   nombre: string;
   codigo: string;
+  codigo_barra?: string | null;
   categoria: string;
+  subcategoria?: string | null;
   precio: number;
   cantidad: number;
   sucursal_id: number;

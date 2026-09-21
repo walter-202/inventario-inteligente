@@ -19,6 +19,7 @@ import {
 import { ProductoInputSchema } from "../api/productosApi";
 import type { NuevoProductoParams, Sucursal } from "../../../shared/types/domain";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
+import { CameraScanModal } from "../../../shared/components/CameraScanModal";
 import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
 import { useVoiceRegistration, type VoiceRegistrationState } from "../hooks/useVoiceRegistration";
@@ -130,22 +131,20 @@ function VoiceStatusBar({ state, transcript, error, onClear }: VoiceStatusBarPro
   );
 }
 
-// ─── Fashion categories shortcuts ──────────────────────────────────────────────
+// ─── Lidemoda categories shortcuts ──────────────────────────────────────────────
 
-const FASHION_CATEGORIES = [
-  "Pantalones",
-  "Chompas",
-  "Blusas",
-  "Vestidos",
-  "Poleras",
-  "Chaquetas",
-  "Accesorios",
+const LIDEMODA_CATEGORIES = [
+  "belleza",
+  "accesorios",
+  "hogar",
+  "regalos",
+  "novedades",
 ];
 
 const VOICE_EXAMPLES = [
-  "Chompa lana alpaca código CHO-500 precio 220 cantidad 15 categoría Chompas",
-  "Vestido floral primavera código VES-400 precio 260 cantidad 20 categoría Vestidos",
-  "Jean cargo negro código JEA-300 precio 195 cantidad 30 categoría Pantalones",
+  "Base líquida código BEL-100 código de barra 6924372664384 precio 35 cantidad 15 categoría belleza",
+  "Taza Messi código HOG-200 precio 35 cantidad 20 categoría hogar",
+  "Aretes de aro código ACC-300 precio 20 cantidad 30 categoría accesorios",
 ];
 
 // ─── Main form ─────────────────────────────────────────────────────────────────
@@ -159,25 +158,32 @@ interface ProductFormProps {
   onSubmit: (input: NuevoProductoParams) => void;
 }
 
-type Field = "nombre" | "codigo" | "categoria" | "precio" | "cantidad" | "sucursal_id";
+type Field = "nombre" | "codigo" | "codigo_barra" | "categoria" | "subcategoria" | "precio" | "cantidad" | "sucursal_id";
 
 export function ProductForm({ branches, resetToken = 0, loading = false, serverError, initialValues, onSubmit }: ProductFormProps) {
   const [values, setValues] = useState({
     nombre: initialValues?.nombre ?? "",
     codigo: initialValues?.codigo ?? "",
+    codigo_barra: initialValues?.codigo_barra ?? "",
     categoria: initialValues?.categoria ?? "",
+    subcategoria: initialValues?.subcategoria ?? "",
     precio: initialValues?.precio !== undefined ? String(initialValues.precio) : "",
     cantidad: initialValues?.cantidad !== undefined ? String(initialValues.cantidad) : "",
   });
   const [sucursalId, setSucursalId] = useState<number | null>(branches[0]?.id ?? null);
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [showExamples, setShowExamples] = useState(false);
+  const [scanModalTarget, setScanModalTarget] = useState<"codigo" | "codigo_barra" | null>(null);
 
   useEffect(() => {
-    if (initialValues?.codigo) {
-      setValues((prev) => ({ ...prev, codigo: initialValues.codigo! }));
+    if (initialValues?.codigo || initialValues?.codigo_barra) {
+      setValues((prev) => ({
+        ...prev,
+        codigo: initialValues.codigo ?? prev.codigo,
+        codigo_barra: initialValues.codigo_barra ?? prev.codigo_barra,
+      }));
     }
-  }, [initialValues?.codigo]);
+  }, [initialValues?.codigo, initialValues?.codigo_barra]);
 
   const voice = useVoiceRegistration();
   const pulse = usePulse(voice.state === "listening");
@@ -185,7 +191,15 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
 
   // Reset form
   useEffect(() => {
-    setValues({ nombre: "", codigo: "", categoria: "", precio: "", cantidad: "" });
+    setValues({
+      nombre: "",
+      codigo: "",
+      codigo_barra: "",
+      categoria: "",
+      subcategoria: "",
+      precio: "",
+      cantidad: "",
+    });
     setSucursalId(branches[0]?.id ?? null);
     setErrors({});
     voice.reset();
@@ -201,7 +215,9 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
     setValues((prev) => ({
       nombre: voice.result!.nombre ?? prev.nombre,
       codigo: voice.result!.codigo ?? prev.codigo,
+      codigo_barra: voice.result!.codigo_barra ?? prev.codigo_barra,
       categoria: voice.result!.categoria ?? prev.categoria,
+      subcategoria: prev.subcategoria,
       precio: voice.result!.precio != null ? String(voice.result!.precio) : prev.precio,
       cantidad: voice.result!.cantidad != null ? String(voice.result!.cantidad) : prev.cantidad,
     }));
@@ -225,7 +241,9 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
     const result = ProductoInputSchema.safeParse({
       nombre: values.nombre,
       codigo: values.codigo,
+      codigo_barra: values.codigo_barra.trim() || null,
       categoria: values.categoria,
+      subcategoria: values.subcategoria.trim() || null,
       precio: precioText ? precio : Number.NaN,
       cantidad: cantidadText ? cantidad : Number.NaN,
       sucursal_id: sucursalId,
@@ -388,7 +406,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
             <View style={styles.field}>
               <TextInput
                 mode="outlined"
-                label="Código SKU"
+                label="Código SKU interno"
                 value={values.codigo}
                 onChangeText={(value) => update("codigo", value)}
                 error={Boolean(errors.codigo)}
@@ -397,13 +415,35 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
                 right={
                   <TextInput.Icon
                     icon={() => <ScanBarcode size={20} color={colors.primary} />}
-                    onPress={() => router.push({ pathname: "/escanear", params: { mode: "registro" } })}
+                    onPress={() => setScanModalTarget("codigo")}
+                    accessibilityLabel="Escanear SKU con la cámara"
+                  />
+                }
+                placeholder="Ej: BEL-001 o tocá para escanear"
+              />
+              <HelperText type="error" visible={Boolean(errors.codigo)}>{errors.codigo}</HelperText>
+            </View>
+
+            {/* Código de barras del fabricante */}
+            <View style={styles.field}>
+              <TextInput
+                mode="outlined"
+                label="Código de barras (EAN-13 / Fabricante)"
+                value={values.codigo_barra}
+                onChangeText={(value) => update("codigo_barra", value)}
+                error={Boolean(errors.codigo_barra)}
+                keyboardType="numeric"
+                left={<TextInput.Icon icon={() => <Barcode size={20} color={colors.primary} />} />}
+                right={
+                  <TextInput.Icon
+                    icon={() => <ScanBarcode size={20} color={colors.primary} />}
+                    onPress={() => setScanModalTarget("codigo_barra")}
                     accessibilityLabel="Escanear código de barras con la cámara"
                   />
                 }
-                placeholder="Ej: JEA-001 o tocá para escanear"
+                placeholder="Ej: 6924372664384 o tocá para escanear"
               />
-              <HelperText type="error" visible={Boolean(errors.codigo)}>{errors.codigo}</HelperText>
+              <HelperText type="error" visible={Boolean(errors.codigo_barra)}>{errors.codigo_barra}</HelperText>
             </View>
 
             {/* Categoría con chips de acceso rápido */}
@@ -418,7 +458,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
                 placeholder="Elegí o escribí una categoría"
               />
               <View style={styles.categoryChipsContainer}>
-                {FASHION_CATEGORIES.map((cat) => {
+                {LIDEMODA_CATEGORIES.map((cat) => {
                   const isSelected = values.categoria.toLowerCase() === cat.toLowerCase();
                   return (
                     <Chip
@@ -496,6 +536,18 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
           </Button>
         </Card.Content>
       </Card>
+
+      <CameraScanModal
+        visible={scanModalTarget !== null}
+        onClose={() => setScanModalTarget(null)}
+        title={scanModalTarget === "codigo_barra" ? "Escanear código de barras" : "Escanear SKU"}
+        onScan={(code) => {
+          if (scanModalTarget) {
+            update(scanModalTarget, code);
+          }
+          setScanModalTarget(null);
+        }}
+      />
     </ScrollView>
   );
 }

@@ -15,6 +15,7 @@ interface ProductRegistrationCardProps {
   onConfirm: (input: {
     nombre: string;
     codigo: string;
+    codigo_barra?: string | null;
     categoria: string;
     precio: number;
     cantidad: number;
@@ -40,6 +41,7 @@ export function ProductRegistrationCard({
 }: ProductRegistrationCardProps) {
   const [nombre, setNombre] = useState(initialData.nombre ?? "");
   const [codigo, setCodigo] = useState(initialData.codigo ?? "");
+  const [codigoBarra, setCodigoBarra] = useState(initialData.codigo_barra ?? "");
   const [categoria, setCategoria] = useState(initialData.categoria ?? "Ropa");
   const [precio, setPrecio] = useState(initialData.precio ? String(initialData.precio) : "");
   const [cantidad, setCantidad] = useState(initialData.cantidad ? String(initialData.cantidad) : "1");
@@ -54,6 +56,7 @@ export function ProductRegistrationCard({
     onConfirm({
       nombre: nombre.trim(),
       codigo: finalCode,
+      codigo_barra: codigoBarra.trim() || null,
       categoria: categoria.trim() || "General",
       precio: numPrecio,
       cantidad: numCantidad,
@@ -149,7 +152,7 @@ export function ProductRegistrationCard({
         <Button
           mode="outlined"
           compact
-          onPress={() => onOpenForm({ nombre, codigo, categoria, precio: numPrecio, cantidad: numCantidad })}
+          onPress={() => onOpenForm({ nombre, codigo, codigo_barra: codigoBarra || null, categoria, precio: numPrecio, cantidad: numCantidad })}
           disabled={loading}
         >
           Formulario completo

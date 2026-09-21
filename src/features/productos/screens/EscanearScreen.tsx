@@ -21,7 +21,11 @@ export function EscanearScreen() {
         router.push({ pathname: "/producto-detalle", params: { id: String(product.id) } });
       }}
       onRegisterNew={(codigo) => {
-        router.push({ pathname: "/registrar-producto", params: { codigo } });
+        const isEan = /^\d{8,14}$/.test(codigo.trim());
+        router.push({
+          pathname: "/registrar-producto",
+          params: isEan ? { codigo_barra: codigo } : { codigo },
+        });
       }}
     />
   );

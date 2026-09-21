@@ -15,14 +15,12 @@ interface ProductEditModalProps {
   onSubmit: (id: number, params: ActualizarProductoParams) => void;
 }
 
-const FASHION_CATEGORIES = [
-  "Pantalones",
-  "Chompas",
-  "Blusas",
-  "Vestidos",
-  "Poleras",
-  "Chaquetas",
-  "Accesorios",
+const LIDEMODA_CATEGORIES = [
+  "belleza",
+  "accesorios",
+  "hogar",
+  "regalos",
+  "novedades",
 ];
 
 export function ProductEditModal({
@@ -34,6 +32,7 @@ export function ProductEditModal({
 }: ProductEditModalProps) {
   const [nombre, setNombre] = useState("");
   const [codigo, setCodigo] = useState("");
+  const [codigoBarra, setCodigoBarra] = useState("");
   const [categoria, setCategoria] = useState("");
   const [precio, setPrecio] = useState("");
   const [errors, setErrors] = useState<Partial<Record<keyof ActualizarProductoParams, string>>>({});
@@ -43,6 +42,7 @@ export function ProductEditModal({
     if (producto) {
       setNombre(producto.nombre);
       setCodigo(producto.codigo);
+      setCodigoBarra(producto.codigo_barra ?? "");
       setCategoria(producto.categoria);
       setPrecio(String(producto.precio));
       setErrors({});
@@ -55,6 +55,7 @@ export function ProductEditModal({
     const validation = ActualizarProductoSchema.safeParse({
       nombre,
       codigo,
+      codigo_barra: codigoBarra.trim() || null,
       categoria,
       precio: Number.isFinite(precioNum) ? precioNum : Number.NaN,
     });
@@ -113,7 +114,7 @@ export function ProductEditModal({
             <View>
               <TextInput
                 mode="outlined"
-                label="Código SKU"
+                label="Código SKU interno"
                 value={codigo}
                 onChangeText={setCodigo}
                 autoCapitalize="characters"
@@ -122,6 +123,23 @@ export function ProductEditModal({
               />
               <HelperText type="error" visible={Boolean(errors.codigo)}>
                 {errors.codigo}
+              </HelperText>
+            </View>
+
+            {/* Código de barras del fabricante */}
+            <View>
+              <TextInput
+                mode="outlined"
+                label="Código de barras (EAN-13 / Fabricante)"
+                value={codigoBarra}
+                onChangeText={setCodigoBarra}
+                keyboardType="numeric"
+                error={Boolean(errors.codigo_barra)}
+                left={<TextInput.Icon icon={() => <Barcode size={20} color={colors.primary} />} />}
+                placeholder="Ej: 6924372664384"
+              />
+              <HelperText type="error" visible={Boolean(errors.codigo_barra)}>
+                {errors.codigo_barra}
               </HelperText>
             </View>
 
@@ -136,7 +154,7 @@ export function ProductEditModal({
                 left={<TextInput.Icon icon={() => <Layers size={20} color={colors.primary} />} />}
               />
               <View style={styles.categoryChips}>
-                {FASHION_CATEGORIES.map((cat) => {
+                {LIDEMODA_CATEGORIES.map((cat) => {
                   const isSelected = categoria.toLowerCase() === cat.toLowerCase();
                   return (
                     <Chip

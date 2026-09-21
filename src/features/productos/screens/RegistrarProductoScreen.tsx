@@ -18,7 +18,7 @@ export function RegistrarProductoScreen() {
 }
 
 function RegistrarProductoForm() {
-  const { codigo } = useLocalSearchParams<{ codigo?: string }>();
+  const { codigo, codigo_barra } = useLocalSearchParams<{ codigo?: string; codigo_barra?: string }>();
   const { activeBranchId, canChangeBranch } = useActiveBranch();
   const branches = useSucursales();
   const mutation = useRegistrarProducto();
@@ -36,12 +36,19 @@ function RegistrarProductoForm() {
     );
   }, [mutation.data, mutation.isSuccess, mutation.reset]);
   const availableBranches = canChangeBranch ? branches.data ?? [] : (branches.data ?? []).filter((branch) => branch.id === activeBranchId);
+
+  const isEan = codigo && /^\d{8,14}$/.test(codigo.trim());
+  const initialValues = {
+    codigo: !isEan && codigo ? codigo : undefined,
+    codigo_barra: isEan ? codigo : (codigo_barra || undefined),
+  };
+
   return (
     <ScreenContainer>
       <ProductForm
         resetToken={resetToken}
         branches={availableBranches}
-        initialValues={codigo ? { codigo } : undefined}
+        initialValues={initialValues}
         loading={mutation.isPending}
         serverError={mutation.error ? extraerMensajeError(mutation.error, "No se pudo registrar el producto.") : null}
         onSubmit={(input) => mutation.mutate(input)}

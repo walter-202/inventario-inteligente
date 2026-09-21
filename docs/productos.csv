@@ -1,0 +1,105 @@
+﻿codigo,nombre,categoria,subcategoria,precio,stock_minimo
+BEL-001,Base Líquida,belleza,Maquillaje,35.0,5
+ACC-001,Aretes,accesorios,Bisutería,20.0,5
+HOG-001,Taza Messi,hogar,Tazas,35.0,5
+NOV-001,Agendas Ahorradoras,novedades,Agendas,30.0,5
+BEL-002,Base en Crema,belleza,Maquillaje,35.0,5
+ACC-002,Aretes de Aro,accesorios,Bisutería,20.0,5
+HOG-002,Taza Ronaldo,hogar,Tazas,35.0,5
+BEL-003,Corrector,belleza,Maquillaje,35.0,5
+ACC-003,Aretes Colgantes,accesorios,Bisutería,20.0,5
+HOG-003,Taza Harry Potter,hogar,Tazas,35.0,5
+BEL-004,Polvo Compacto,belleza,Maquillaje,35.0,5
+ACC-004,Aretes Pequeños,accesorios,Bisutería,20.0,5
+HOG-004,Taza Control de Play,hogar,Vasos,30.0,5
+BEL-005,Polvo Suelto,belleza,Maquillaje,35.0,5
+ACC-005,Collar,accesorios,Bisutería,20.0,5
+HOG-005,Taza Bob Esponja,hogar,Vasos,30.0,5
+BEL-006,Rubor,belleza,Maquillaje,35.0,5
+ACC-006,Collar con Dije,accesorios,Bisutería,20.0,5
+HOG-006,Botella Decorativa,hogar,Botellas,45.0,5
+BEL-007,Iluminador,belleza,Maquillaje,35.0,5
+ACC-007,Gargantilla,accesorios,Bisutería,20.0,5
+HOG-007,Termo Decorativo,hogar,Termos,55.0,5
+BEL-008,Contorno,belleza,Maquillaje,35.0,5
+ACC-008,Pulsera,accesorios,Bisutería,20.0,5
+HOG-008,Marco para Fotos,hogar,Decoración,40.0,5
+BEL-009,Paleta de Sombras,belleza,Maquillaje,35.0,5
+ACC-009,Pulseras,accesorios,Bisuteria,30.0,5
+HOG-009,Portarretrato,hogar,Decoración,40.0,5
+BEL-010,Sombra Individual,belleza,Maquillaje,35.0,5
+ACC-010,Broche,accesorios,Bisutería,20.0,5
+HOG-010,Espejo Decorativo,hogar,Decoración,40.0,5
+BEL-011,Delineador Líquido,belleza,Maquillaje,35.0,5
+ACC-011,Vincha,accesorios,Cabello,15.0,5
+REG-001,Llavero de Regalo,regalos,Detalles,45.0,5
+BEL-012,Delineador en Lápiz,belleza,Maquillaje,35.0,5
+ACC-012,Vincha Acolchada,accesorios,Cabello,15.0,5
+REG-002,Llavero de Peluche,regalos,Detalles,45.0,5
+BEL-013,Máscara de Pestañas,belleza,Maquillaje,35.0,5
+ACC-013,Ganchos para Cabello,accesorios,Cabello,15.0,5
+REG-003,Peluche Stich,regalos,Detalles,45.0,5
+BEL-014,Pestañas Postizas,belleza,Maquillaje,35.0,5
+ACC-014,Ganchos Decorativos,accesorios,Cabello,15.0,5
+REG-004,Peluche Mushu,regalos,Detalles,45.0,5
+BEL-015,Adhesivo para Pestañas,belleza,Maquillaje,35.0,5
+ACC-015,Colitas para Cabello,accesorios,Cabello,15.0,5
+REG-005,Almohada de Gato,regalos,Detalles,45.0,5
+BEL-016,Labial,belleza,Maquillaje,35.0,5
+ACC-016,Elásticos para Cabello,accesorios,Cabello,15.0,5
+REG-006,Peluche Snopy,regalos,Detalles,45.0,5
+BEL-017,Labial Líquido,belleza,Maquillaje,35.0,5
+ACC-017,Moños para Cabello,accesorios,Cabello,15.0,5
+REG-007,Peluche Lotso,regalos,Detalles,45.0,5
+BEL-018,Labial Mate,belleza,Maquillaje,35.0,5
+ACC-018,Diademas,accesorios,Cabello,15.0,5
+REG-008,Pantuflas Stich,regalos,Detalles,45.0,5
+BEL-019,Brillo Labial,belleza,Maquillaje,35.0,5
+ACC-019,Pasadores para Cabello,accesorios,Cabello,15.0,5
+REG-009,Pantuflas Conejito,regalos,Detalles,45.0,5
+BEL-020,Tinta para Labios,belleza,Maquillaje,35.0,5
+ACC-020,Pinza para Cabello,accesorios,Cabello,15.0,5
+BEL-021,Lápiz Labial,belleza,Maquillaje,35.0,5
+ACC-021,Broche para Cabello,accesorios,Cabello,15.0,5
+BEL-022,Lápiz para Cejas,belleza,Maquillaje,35.0,5
+ACC-022,Cartera,accesorios,Bolsos,85.0,5
+BEL-023,Gel para Cejas,belleza,Maquillaje,35.0,5
+ACC-023,Cartera Pequeña,accesorios,Bolsos,85.0,5
+BEL-024,Sombras para Cejas,belleza,Maquillaje,35.0,5
+ACC-024,Cartera de Mano,accesorios,Bolsos,85.0,5
+BEL-025,Primer Facial,belleza,Preparación de maquillaje,30.0,5
+ACC-025,Bolso,accesorios,Bolsos,85.0,5
+BEL-026,Fijador de Maquillaje,belleza,Preparación de maquillaje,30.0,5
+ACC-026,Mochila,accesorios,Bolsos,85.0,5
+BEL-027,Desmaquillante,belleza,Cuidado facial,40.0,5
+ACC-027,Canguro,accesorios,Bolsos,85.0,5
+BEL-028,Agua Micelar,belleza,Cuidado facial,40.0,5
+ACC-028,Billetera,accesorios,Bolsos,85.0,5
+BEL-029,Limpiador Facial,belleza,Cuidado facial,40.0,5
+ACC-029,Monedero,accesorios,Bolsos,85.0,5
+BEL-030,Exfoliante Facial,belleza,Cuidado facial,40.0,5
+ACC-030,Llavero,accesorios,Accesorios,30.0,5
+BEL-031,Mascarilla Facial,belleza,Cuidado facial,40.0,5
+ACC-031,Llavero Capibara,accesorios,Accesorios,30.0,5
+BEL-032,Crema Facial,belleza,Cuidado facial,40.0,5
+ACC-032,Llavero de Peluche,accesorios,Accesorios,30.0,5
+BEL-033,Sérum Facial,belleza,Cuidado facial,40.0,5
+ACC-033,Ponchos,accesorios,Ropa,65.0,5
+BEL-034,Protector Solar,belleza,Cuidado facial,40.0,5
+NOV-002,Brillo con Llaveros,novedades,General,30.0,5
+BEL-035,Bálsamo Labial,belleza,Cuidado personal,25.0,5
+BEL-036,Crema Corporal,belleza,Cuidado corporal,30.0,5
+BEL-037,Loción Corporal,belleza,Cuidado corporal,30.0,5
+BEL-038,Perfume,belleza,Perfumería,120.0,5
+BEL-039,Colonia,belleza,Perfumería,120.0,5
+BEL-040,Body Splash,belleza,Perfumería,120.0,5
+BEL-041,Desodorante,belleza,Perfumería,120.0,5
+BEL-042,Esponja de Maquillaje,belleza,Accesorios de maquillaje,25.0,5
+BEL-043,Brocha para Base,belleza,Accesorios de maquillaje,25.0,5
+BEL-044,Brocha para Rubor,belleza,Accesorios de maquillaje,25.0,5
+BEL-045,Brocha para Sombras,belleza,Accesorios de maquillaje,25.0,5
+BEL-046,Set de Brochas,belleza,Accesorios de maquillaje,25.0,5
+BEL-047,Rizador de Pestañas,belleza,Accesorios de maquillaje,25.0,5
+BEL-048,Pinza para Cejas,belleza,Accesorios de maquillaje,25.0,5
+BEL-049,Espejo de Maquillaje,belleza,Accesorios de maquillaje,25.0,5
+BEL-050,Gemas para Rostro,belleza,Decoración facial,30.0,5

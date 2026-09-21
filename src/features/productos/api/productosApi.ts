@@ -14,7 +14,9 @@ import type {
 const productInputSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio.").max(255),
   codigo: z.string().trim().min(1, "El código es obligatorio.").max(255),
+  codigo_barra: z.string().trim().max(255).optional().nullable(),
   categoria: z.string().trim().min(1, "La categoría es obligatoria.").max(255),
+  subcategoria: z.string().trim().max(255).optional().nullable(),
   precio: z.number().finite().nonnegative("El precio debe ser mayor o igual a 0."),
   cantidad: z.number().int().nonnegative("La cantidad debe ser un entero mayor o igual a 0."),
   sucursal_id: z.number().int().positive(),
@@ -34,7 +36,7 @@ export async function obtenerProductos(params: ProductosParams = {}): Promise<Pr
     .order("id", { ascending: true });
   if (params.q?.trim()) {
     const q = params.q.trim();
-    query = query.or(`nombre.ilike.%${q}%,codigo.ilike.%${q}%,categoria.ilike.%${q}%`);
+    query = query.or(`nombre.ilike.%${q}%,codigo.ilike.%${q}%,codigo_barra.ilike.%${q}%,categoria.ilike.%${q}%`);
   }
   if (params.categoria?.trim()) query = query.eq("categoria", params.categoria.trim());
   const { data, error, count } = await query.range(from, to);
@@ -61,7 +63,8 @@ export async function registrarProducto(params: NuevoProductoParams): Promise<Pr
     p_precio: input.precio,
     p_cantidad: input.cantidad,
     p_sucursal_id: input.sucursal_id,
-  });
+    p_codigo_barra: input.codigo_barra ?? null,
+  } as any);
   if (error) {
     if (error.code === "23505" || error.message.includes("unique")) {
       throw new Error("El código ingresado ya existe. Ingresa un código diferente.");
@@ -73,9 +76,13 @@ export async function registrarProducto(params: NuevoProductoParams): Promise<Pr
 
 export async function buscarProductoPorCodigo(codigo: string): Promise<Producto> {
   const normalized = z.string().trim().min(1).parse(codigo);
-  const { data, error } = await supabase.from("productos").select("*").eq("codigo", normalized).single();
+  const { data, error } = await supabase
+    .from("productos")
+    .select("*")
+    .or(`codigo.eq.${normalized},codigo_barra.eq.${normalized}`)
+    .limit(1)
+    .maybeSingle();
   if (error) {
-    if (error.code === "PGRST116") throw new ProductoNoEncontradoError();
     throw new ProductoLookupError(error.message);
   }
   if (!data) throw new ProductoNoEncontradoError();
@@ -97,11 +104,11 @@ export async function buscarProductosAsistente(query: string, limite = 10): Prom
   const q = query.trim();
   if (!q) return [];
 
-  // Búsqueda rápida por código exacto o prefijo
+  // Búsqueda rápida por código exacto o prefijo (soporta SKU y código de barras)
   const { data: codeMatches, error: codeErr } = await supabase
     .from("productos")
     .select("*")
-    .or(`codigo.ilike.${q}%,codigo.ilike.%${q}%`)
+    .or(`codigo.ilike.${q}%,codigo.ilike.%${q}%,codigo_barra.ilike.${q}%,codigo_barra.ilike.%${q}%`)
     .limit(limite);
 
   if (codeErr) throw new Error(codeErr.message);
@@ -137,7 +144,9 @@ export async function obtenerCategoriasProductos(): Promise<string[]> {
 export const ActualizarProductoSchema = z.object({
   nombre: z.string().trim().min(1, "El nombre es obligatorio.").max(255),
   codigo: z.string().trim().min(1, "El código es obligatorio.").max(255),
+  codigo_barra: z.string().trim().max(255).optional().nullable(),
   categoria: z.string().trim().min(1, "La categoría es obligatoria.").max(255),
+  subcategoria: z.string().trim().max(255).optional().nullable(),
   precio: z.number().finite().nonnegative("El precio debe ser mayor o igual a 0."),
   stock_minimo: z.number().int().nonnegative("El stock mínimo debe ser mayor o igual a 0.").optional(),
 });
@@ -154,6 +163,12 @@ export async function actualizarProducto(id: number, params: ActualizarProductoP
     precio: input.precio,
     updated_at: new Date().toISOString(),
   };
+  if (input.codigo_barra !== undefined) {
+    updatePayload.codigo_barra = input.codigo_barra;
+  }
+  if (input.subcategoria !== undefined) {
+    updatePayload.subcategoria = input.subcategoria;
+  }
   if (input.stock_minimo !== undefined) {
     updatePayload.stock_minimo = input.stock_minimo;
   }
