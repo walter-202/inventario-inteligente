@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { LogOut, Mic, Sparkles } from "lucide-react-native";
+import { AlertTriangle, BookOpen, LogOut, Mic, Sparkles, TrendingUp } from "lucide-react-native";
 import { Link } from "expo-router";
 import { Button, Card, Text } from "react-native-paper";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -38,9 +38,24 @@ export function MasScreen() {
       </Card>
       <Card mode="outlined">
         <Card.Content style={styles.content}>
-          <Text variant="titleMedium">Operaciones</Text>
+          <Text variant="titleMedium">Operaciones y Auditoría</Text>
+          <Link href={"/rotacion" as any} asChild>
+            <Button mode="outlined" icon={() => <TrendingUp size={18} color="#2563EB" />}>
+              Rotación y Marketing IA (RF-26/28)
+            </Button>
+          </Link>
+          <Link href={"/alertas-stock" as any} asChild>
+            <Button mode="outlined" icon={() => <AlertTriangle size={18} color="#D97706" />}>
+              Stock Crítico y Reabastecimiento IA (RF-08/26)
+            </Button>
+          </Link>
+          <Link href={"/kardex" as any} asChild>
+            <Button mode="outlined" icon={() => <BookOpen size={18} />}>
+              Kardex e Historial de Movimientos (RF-12)
+            </Button>
+          </Link>
           <Link href="/movimientos" asChild>
-            <Button mode="outlined">Movimientos de inventario</Button>
+            <Button mode="outlined">Movimientos y Despachos</Button>
           </Link>
           <Link href="/registro-voz" asChild>
             <Button mode="outlined" icon={() => <Mic size={18} />}>

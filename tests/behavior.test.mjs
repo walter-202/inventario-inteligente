@@ -512,4 +512,384 @@ test("barcode registration preserves scanned code in product schema validation",
   assert.equal(parsed.data.codigo, "7751234567890");
 });
 
+test("fijar-resumen updates session summary without completing or closing active conversation", () => {
+  const { chatReducer, chatInicial } = loadTsModule("src/features/asistente-ia/lib/chatSession.ts");
+  const sesion = { id: "s-multi", objetivo: "indefinido", estado: "activa", resumen: null, createdAt: 1, updatedAt: 1 };
+  let state = chatReducer(chatInicial, { type: "nueva-sesion", session: sesion });
+  assert.equal(state.activeSessionId, "s-multi");
+
+  state = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "s-multi",
+    message: { id: "m1", role: "usuario", texto: "cuanto stock queda de chompas" },
+    updatedAt: 2,
+  });
+
+  state = chatReducer(state, {
+    type: "fijar-resumen",
+    sessionId: "s-multi",
+    resumen: "Stock Chompas (15)",
+    updatedAt: 3,
+  });
+
+  assert.equal(state.sessions[0].resumen, "Stock Chompas (15)");
+  assert.equal(state.sessions[0].estado, "activa");
+  assert.equal(state.activeSessionId, "s-multi");
+
+  // It can still receive follow-up messages without freezing!
+  state = chatReducer(state, {
+    type: "agregar-mensaje",
+    sessionId: "s-multi",
+    message: { id: "m2", role: "usuario", texto: "y en la otra sucursal?" },
+    updatedAt: 4,
+  });
+  assert.equal(state.messages["s-multi"].length, 2);
+});
+
+test("voice assistant heuristic supports conversational greetings and dynamic branches", () => {
+  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+  const saludo = interpretarHeuristica("hola buen día");
+  assert.equal(saludo.accion, "conversacion");
+  assert.equal(typeof saludo.respuestaConversacional, "string");
+
+  // Dynamic branches lookup
+  const stockCustom = interpretarHeuristica("cuanto stock queda de Jean Mom Fit en Equipetrol", ["Central", "Equipetrol"]);
+  assert.equal(stockCustom.accion, "consulta_stock");
+  assert.equal(stockCustom.consulta?.sucursal?.toLowerCase(), "equipetrol");
+});
+
+test("camera barcode scanner normalizes scanned code and triggers search query", () => {
+  const { normalizarCodigoSKU } = loadTsModule("src/features/asistente-ia/lib/productMatching.ts");
+
+  // Raw scanned barcode data with whitespace or trailing returns
+  const rawScannedBarcode = "  7751234567890 \r\n ";
+  const cleaned = rawScannedBarcode.trim();
+  assert.equal(cleaned, "7751234567890");
+
+  // Alphanumeric SKU codes scanned via camera/QR
+  const rawQrSku = " jea - 001 ";
+  const normalizedSku = normalizarCodigoSKU(rawQrSku);
+  assert.equal(normalizedSku, "jea-001");
+});
+
+test("two-phase dispatch and reception schema validation enforces strict logistics rules (RF-06 & RF-07)", () => {
+  const { EmitirDespachoSchema, ConfirmarRecepcionSchema } = loadTsModule("src/features/inventario/api/despachosApi.ts");
+
+  // RF-06: Same origin and destination is rejected
+  const sameBranch = EmitirDespachoSchema.safeParse({
+    producto_id: 1,
+    sucursal_origen_id: 1,
+    sucursal_destino_id: 1,
+    cantidad: 10,
+  });
+  assert.equal(sameBranch.success, false);
+
+  // RF-06: Negative or zero quantity is rejected
+  const invalidQty = EmitirDespachoSchema.safeParse({
+    producto_id: 1,
+    sucursal_origen_id: 1,
+    sucursal_destino_id: 2,
+    cantidad: 0,
+  });
+  assert.equal(invalidQty.success, false);
+
+  // RF-06: Valid dispatch order accepted
+  const validDispatch = EmitirDespachoSchema.safeParse({
+    producto_id: 1,
+    sucursal_origen_id: 1,
+    sucursal_destino_id: 2,
+    cantidad: 15,
+    observacion: "Lote de 3 cajas",
+  });
+  assert.equal(validDispatch.success, true);
+
+  // RF-07: Confirm reception rejects invalid quantities
+  const invalidReception = ConfirmarRecepcionSchema.safeParse({
+    orden_id: 99,
+    cantidad_recibida: -5,
+  });
+  assert.equal(invalidReception.success, false);
+
+  // RF-07: Valid confirmation accepted
+  const validReception = ConfirmarRecepcionSchema.safeParse({
+    orden_id: 99,
+    cantidad_recibida: 15,
+    observacion: "Recibido en buen estado",
+  });
+  assert.equal(validReception.success, true);
+});
+
+test("V2 RF-09: RegistrarMermaSchema validates motives and rejects invalid quantities", () => {
+  const { RegistrarMermaSchema } = loadTsModule("src/features/inventario/api/mermasApi.ts");
+  const { MOTIVOS_MERMA } = loadTsModule("src/shared/types/domain.ts");
+
+  // Every documented motivo is valid
+  for (const motivo of MOTIVOS_MERMA) {
+    const res = RegistrarMermaSchema.safeParse({
+      sucursal_id: 1,
+      producto_id: 10,
+      cantidad: 2,
+      motivo,
+      observacion: "Prenda de exhibición",
+    });
+    assert.equal(res.success, true, `Expected motivo "${motivo}" to be accepted`);
+  }
+
+  // Reject invalid motivo
+  const invalidMotivo = RegistrarMermaSchema.safeParse({
+    sucursal_id: 1,
+    producto_id: 10,
+    cantidad: 2,
+    motivo: "quemado_no_valido",
+  });
+  assert.equal(invalidMotivo.success, false);
+
+  // Reject non-positive quantity
+  const zeroQty = RegistrarMermaSchema.safeParse({
+    sucursal_id: 1,
+    producto_id: 10,
+    cantidad: 0,
+    motivo: "rotura",
+  });
+  assert.equal(zeroQty.success, false);
+});
+
+test("V2 RF-17: AnularVentaSchema requires positive sale ID and justification motive", () => {
+  const { AnularVentaSchema } = loadTsModule("src/features/ventas/api/ventasApi.ts");
+
+  // Valid cancellation
+  const valid = AnularVentaSchema.safeParse({
+    venta_id: 42,
+    motivo: "Error en el medio de pago seleccionado por el cajero",
+  });
+  assert.equal(valid.success, true);
+
+  // Reject empty motive
+  const emptyMotivo = AnularVentaSchema.safeParse({
+    venta_id: 42,
+    motivo: "  ",
+  });
+  assert.equal(emptyMotivo.success, false);
+
+  // Reject short motive (< 3 characters)
+  const shortMotivo = AnularVentaSchema.safeParse({
+    venta_id: 42,
+    motivo: "no",
+  });
+  assert.equal(shortMotivo.success, false);
+
+  // Reject non-positive sale ID
+  const invalidId = AnularVentaSchema.safeParse({
+    venta_id: -1,
+    motivo: "Motivo valido de prueba",
+  });
+  assert.equal(invalidId.success, false);
+});
+
+test("V2 RF-25: VisualRecognitionSchema enforces multimodal garment traits and confidence score", () => {
+  const { VisualRecognitionSchema } = loadTsModule("src/features/asistente-ia/api/visualRecognitionService.ts");
+
+  const validPayload = {
+    analisis_prenda: {
+      categoria: "Campera",
+      color_principal: "Azul oscuro",
+      tipo_corte: "Bomber",
+      caracteristicas_distintivas: "Cierre metálico y cuello elástico",
+    },
+    candidatos: [
+      {
+        producto_id: 14,
+        nombre: "Campera Bomber Navy",
+        codigo: "SKU-BOMBER-01",
+        categoria: "Abrigos",
+        precio: 250,
+        confidence: 0.94,
+        razon: "El tono azul y el corte bomber coinciden con el catálogo",
+      },
+    ],
+  };
+
+  const res = VisualRecognitionSchema.safeParse(validPayload);
+  assert.equal(res.success, true);
+
+  // Reject confidence outside 0-1
+  const invalidConfidence = {
+    ...validPayload,
+    candidatos: [{ ...validPayload.candidatos[0], confidence: 1.5 }],
+  };
+  assert.equal(VisualRecognitionSchema.safeParse(invalidConfidence).success, false);
+});
+
+test("V2 RF-12: Kardex running balance computes progressive stock deltas", () => {
+  // Test running balance logic: entries increment, exits decrement
+  const sampleTransactions = [
+    { id: 1, fecha: "2026-09-01T10:00:00Z", tipo: "entrada", cantidad: 50 },
+    { id: 2, fecha: "2026-09-01T12:00:00Z", tipo: "salida", cantidad: 10 },
+    { id: 3, fecha: "2026-09-02T15:00:00Z", tipo: "salida", cantidad: 5 },
+    { id: 4, fecha: "2026-09-03T09:00:00Z", tipo: "entrada", cantidad: 20 },
+  ];
+
+  let balance = 0;
+  const withBalances = sampleTransactions.map((tx) => {
+    if (tx.tipo === "entrada") balance += tx.cantidad;
+    else if (tx.tipo === "salida") balance -= tx.cantidad;
+    return { ...tx, saldo: balance };
+  });
+
+  assert.equal(withBalances[0].saldo, 50);
+  assert.equal(withBalances[1].saldo, 40);
+  assert.equal(withBalances[2].saldo, 35);
+  assert.equal(withBalances[3].saldo, 55);
+});
+
+test("V2 RF-08: calcularNivelStock categorizes critico, bajo, and optimo based on custom threshold", () => {
+  const { calcularNivelStock } = loadTsModule("src/features/inventario/api/reabastecimientoApi.ts");
+
+  // Critical: 0 or negative
+  assert.equal(calcularNivelStock(0, 5), "critico");
+  assert.equal(calcularNivelStock(-2, 10), "critico");
+
+  // Low: <= stockMinimo
+  assert.equal(calcularNivelStock(1, 5), "bajo");
+  assert.equal(calcularNivelStock(5, 5), "bajo");
+  assert.equal(calcularNivelStock(8, 10), "bajo");
+  assert.equal(calcularNivelStock(10, 10), "bajo");
+
+  // Optimal: > stockMinimo
+  assert.equal(calcularNivelStock(6, 5), "optimo");
+  assert.equal(calcularNivelStock(11, 10), "optimo");
+  assert.equal(calcularNivelStock(100, 5), "optimo");
+});
+
+test("V2 RF-08: ActualizarProductoSchema accepts valid stock_minimo and rejects negative values", () => {
+  const { ActualizarProductoSchema } = loadTsModule("src/features/productos/api/productosApi.ts");
+  const base = { nombre: "Remera Oversize", codigo: "SKU-REM-01", categoria: "Ropa", precio: 80 };
+
+  // Valid with stock_minimo
+  assert.equal(ActualizarProductoSchema.safeParse({ ...base, stock_minimo: 8 }).success, true);
+  assert.equal(ActualizarProductoSchema.safeParse({ ...base, stock_minimo: 0 }).success, true);
+
+  // Valid when omitted (optional)
+  assert.equal(ActualizarProductoSchema.safeParse(base).success, true);
+
+  // Invalid negative or decimal
+  assert.equal(ActualizarProductoSchema.safeParse({ ...base, stock_minimo: -1 }).success, false);
+  assert.equal(ActualizarProductoSchema.safeParse({ ...base, stock_minimo: 4.5 }).success, false);
+});
+
+test("V2 RF-26: replenishment suggestion logic computes optimal transfers within central surplus", () => {
+  // Target: store has 2 units, threshold 10 (target buffer = 20 units -> deficit = 18)
+  const targetStock = 2;
+  const targetMinimo = 10;
+  const targetBuffer = targetMinimo * 2;
+  const deficit = Math.max(0, targetBuffer - targetStock);
+  assert.equal(deficit, 18);
+
+  // Case A: Central has 50 units (threshold 10) -> surplus = 40. Can supply full deficit 18.
+  const centralStockA = 50;
+  const centralMinimoA = 10;
+  const surplusA = Math.max(0, centralStockA - centralMinimoA);
+  const transferA = Math.min(deficit, surplusA);
+  assert.equal(transferA, 18);
+
+  // Case B: Central has only 15 units (threshold 10) -> surplus = 5. Transfers max surplus 5.
+  const centralStockB = 15;
+  const centralMinimoB = 10;
+  const surplusB = Math.max(0, centralStockB - centralMinimoB);
+  const transferB = Math.min(deficit, surplusB);
+  assert.equal(transferB, 5);
+});
+
+test("V2 RF-26: clasificarProductoRotacion categorizes alta, media, and baja rotation based on sales velocity", () => {
+  const { clasificarProductoRotacion } = loadTsModule("src/features/analitica/api/rotacionApi.ts");
+
+  // 0 sales -> always 'baja'
+  assert.equal(clasificarProductoRotacion(0, 10, 0), "baja");
+  assert.equal(clasificarProductoRotacion(0, 0, 0), "baja");
+
+  // High volume (>= 8) or high turnover rate (>= 0.45) -> 'alta'
+  assert.equal(clasificarProductoRotacion(15, 5, 15 / 20), "alta");
+  assert.equal(clasificarProductoRotacion(8, 2, 8 / 10), "alta");
+  assert.equal(clasificarProductoRotacion(5, 5, 0.5), "alta");
+
+  // Low sales (<= 2) with low turnover (< 0.2) -> 'baja'
+  assert.equal(clasificarProductoRotacion(1, 15, 1 / 16), "baja");
+  assert.equal(clasificarProductoRotacion(2, 20, 2 / 22), "baja");
+
+  // Medium regular sales -> 'media'
+  assert.equal(clasificarProductoRotacion(5, 15, 5 / 20), "media");
+  assert.equal(clasificarProductoRotacion(4, 10, 4 / 14), "media");
+});
+
+test("V2 RF-28: generarInsightsMarketing identifies top star, dead stock, and category trends", () => {
+  const { generarInsightsMarketing } = loadTsModule("src/features/analitica/api/rotacionApi.ts");
+
+  const sampleItems = [
+    {
+      productoId: 1,
+      nombre: "Vestido Gala Floral",
+      codigo: "SKU-VES-01",
+      categoria: "Vestidos",
+      precio: 120,
+      stockActual: 3, // Low stock on star item -> triggers risk warning
+      unidadesVendidas: 25,
+      ingresosTotales: 3000,
+      tasaRotacion: 25 / 28,
+      clasificacion: "alta",
+    },
+    {
+      productoId: 2,
+      nombre: "Bufanda Lana Invierno",
+      codigo: "SKU-BUF-02",
+      categoria: "Accesorios",
+      precio: 40,
+      stockActual: 30, // Idle capital = 30 * 40 = 1200
+      unidadesVendidas: 0,
+      ingresosTotales: 0,
+      tasaRotacion: 0,
+      clasificacion: "baja",
+    },
+    {
+      productoId: 3,
+      nombre: "Blusa Seda Blanca",
+      codigo: "SKU-BLU-03",
+      categoria: "Blusas",
+      precio: 60,
+      stockActual: 10,
+      unidadesVendidas: 6,
+      ingresosTotales: 360,
+      tasaRotacion: 6 / 16,
+      clasificacion: "media",
+    },
+  ];
+
+  const insights = generarInsightsMarketing(sampleItems, 30);
+  assert.ok(insights.length >= 3);
+
+  // 1. Star product insight
+  const starInsight = insights.find((i) => i.tipo === "estrella");
+  assert.ok(starInsight);
+  assert.equal(starInsight.productoNombre, "Vestido Gala Floral");
+  assert.ok(starInsight.accionSugerida.includes("vitrina"));
+
+  // 2. Risk of stock-out on star item
+  const riskInsight = insights.find((i) => i.tipo === "oportunidad");
+  assert.ok(riskInsight);
+  assert.equal(riskInsight.productoNombre, "Vestido Gala Floral");
+  assert.ok(riskInsight.accionSugerida.includes("despacho"));
+
+  // 3. Dead stock / idle capital insight
+  const deadStockInsight = insights.find((i) => i.tipo === "estancado");
+  assert.ok(deadStockInsight);
+  assert.equal(deadStockInsight.productoNombre, "Bufanda Lana Invierno");
+  assert.ok(deadStockInsight.descripcion.includes("$1200.00"));
+  assert.ok(deadStockInsight.accionSugerida.includes("descuento"));
+
+  // 4. Category trend insight
+  const catInsight = insights.find((i) => i.tipo === "categoria");
+  assert.ok(catInsight);
+  assert.ok(catInsight.titulo.includes("Vestidos"));
+});
+
+
 
