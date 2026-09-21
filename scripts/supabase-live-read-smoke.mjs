@@ -143,6 +143,18 @@ function validateEndpoint() {
 async function main() {
   const authKeyType = validateEndpoint();
 
+  // Load client and authenticate for the RLS-enabled session smoke
+  const { supabase } = loadTsModule("src/shared/lib/supabase.ts");
+  const authEmail = process.env.TEST_SMOKE_EMAIL || "admin.lidemoda@gmail.com";
+  const authPassword = process.env.TEST_SMOKE_PASSWORD || "Lidemoda2026!";
+  const { error: authErr } = await supabase.auth.signInWithPassword({
+    email: authEmail,
+    password: authPassword,
+  });
+  if (authErr) {
+    fail(`Authenticated smoke login failed: ${authErr.message}`);
+  }
+
   // Only read-only frontend API modules are loaded. Mutation modules/functions are intentionally not imported.
   const { obtenerSucursales } = loadTsModule("src/shared/api/sucursalesApi.ts");
   const { obtenerProductos, buscarProductoPorCodigo } = loadTsModule("src/features/productos/api/productosApi.ts");

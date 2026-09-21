@@ -9,7 +9,8 @@ export type Ability =
   | "sales.read"
   | "sales.write"
   | "movements.write"
-  | "ai.read";
+  | "ai.read"
+  | "users.manage";
 
 export type BranchScope = "any" | "own" | "aggregate" | "none";
 
@@ -17,13 +18,10 @@ const POLICY: Record<Role, Partial<Record<Ability, BranchScope>>> = {
   admin: {
     "dashboard.read": "any",
     "inventory.read": "any",
-    "inventory.write": "any",
     "products.read": "any",
-    "products.write": "any",
     "sales.read": "any",
-    "sales.write": "any",
-    "movements.write": "any",
     "ai.read": "any",
+    "users.manage": "any",
   },
   encargada: {
     "dashboard.read": "own",

@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, Card, HelperText, Text, TextInput } from "react-native-paper";
+import { ActivityIndicator, Button, Card, Chip, HelperText, Text, TextInput } from "react-native-paper";
 
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { colors, spacing } from "../../../shared/theme";
 import { getAuthErrorMessage } from "../api/authApi";
 import { useAuth } from "../hooks/useAuth";
+
+const QUICK_ALIASES: Record<string, string> = {
+  admin: "admin.lidemoda@gmail.com",
+  administrador: "admin.lidemoda@gmail.com",
+  cajera: "cajera.montenegro@gmail.com",
+  encargada: "encargada.comercio@gmail.com",
+  vendedora: "vendedora.ceja@gmail.com",
+  almacen: "almacen.central@gmail.com",
+};
 
 export function LoginScreen() {
   const { status, error, session, profile, signIn, signOut, retryProfile } = useAuth();
@@ -18,7 +27,9 @@ export function LoginScreen() {
     setFormError(null);
     setSubmitting(true);
     try {
-      await signIn(email, password);
+      const raw = email.trim().toLowerCase();
+      const targetEmail = QUICK_ALIASES[raw] ?? email.trim();
+      await signIn(targetEmail, password);
     } catch (nextError) {
       setFormError(getAuthErrorMessage(nextError));
     } finally {
@@ -96,6 +107,65 @@ export function LoginScreen() {
             <Button mode="contained" onPress={() => void submit()} loading={submitting} disabled={submitting}>
               Iniciar sesión
             </Button>
+
+            {__DEV__ && (
+              <View style={styles.devBox}>
+                <Text variant="labelSmall" style={styles.devTitle}>Atajos de prueba rápida:</Text>
+                <View style={styles.devChips}>
+                  <Chip
+                    compact
+                    mode="outlined"
+                    onPress={() => {
+                      setEmail("admin.lidemoda@gmail.com");
+                      setPassword("Lidemoda2026!");
+                    }}
+                  >
+                    Admin
+                  </Chip>
+                  <Chip
+                    compact
+                    mode="outlined"
+                    onPress={() => {
+                      setEmail("cajera.montenegro@gmail.com");
+                      setPassword("Lidemoda2026!");
+                    }}
+                  >
+                    Cajera
+                  </Chip>
+                  <Chip
+                    compact
+                    mode="outlined"
+                    onPress={() => {
+                      setEmail("encargada.comercio@gmail.com");
+                      setPassword("Lidemoda2026!");
+                    }}
+                  >
+                    Encargada
+                  </Chip>
+                  <Chip
+                    compact
+                    mode="outlined"
+                    onPress={() => {
+                      setEmail("almacen.central@gmail.com");
+                      setPassword("Lidemoda2026!");
+                    }}
+                  >
+                    Almacén
+                  </Chip>
+                  <Chip
+                    compact
+                    mode="outlined"
+                    onPress={() => {
+                      setEmail("vendedora.ceja@gmail.com");
+                      setPassword("Lidemoda2026!");
+                    }}
+                  >
+                    Vendedora
+                  </Chip>
+                </View>
+              </View>
+            )}
+
             <Text variant="bodySmall" style={styles.hint}>
               Si todavía no tenés una cuenta, solicitá acceso a administración. El registro público está deshabilitado.
             </Text>
@@ -115,4 +185,19 @@ const styles = StyleSheet.create({
   copy: { color: colors.textSecondary, lineHeight: 22 },
   muted: { color: colors.textSecondary },
   hint: { color: colors.textSecondary, textAlign: "center" },
+  devBox: {
+    backgroundColor: colors.surfaceSecondary,
+    padding: spacing.sm,
+    borderRadius: 12,
+    gap: spacing.xs,
+  },
+  devTitle: {
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  devChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
 });

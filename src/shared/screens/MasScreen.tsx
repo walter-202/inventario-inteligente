@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { AlertTriangle, BookOpen, LogOut, Mic, Sparkles, TrendingUp } from "lucide-react-native";
+import { AlertTriangle, BookOpen, LogOut, Mic, Sparkles, TrendingUp, Users } from "lucide-react-native";
 import { Link } from "expo-router";
 import { Button, Card, Text } from "react-native-paper";
 import { ScreenContainer } from "../components/ScreenContainer";
@@ -7,7 +7,7 @@ import { AppHeader } from "../components/AppHeader";
 import { useConfirm } from "../components/ConfirmDialog";
 import { spacing } from "../theme";
 import { useAuth } from "../../features/auth/hooks/useAuth";
-import { roleLabels } from "../../features/auth/lib/permissions";
+import { can, roleLabels } from "../../features/auth/lib/permissions";
 
 export function MasScreen() {
   const { profile, signOut } = useAuth();
@@ -39,6 +39,13 @@ export function MasScreen() {
       <Card mode="outlined">
         <Card.Content style={styles.content}>
           <Text variant="titleMedium">Operaciones y Auditoría</Text>
+          {can(profile?.rol, "users.manage") && (
+            <Link href={"/usuarios" as any} asChild>
+              <Button mode="contained-tonal" icon={() => <Users size={18} color="#7C3AED" />}>
+                Colaboradores y Roles (Admin)
+              </Button>
+            </Link>
+          )}
           <Link href={"/rotacion" as any} asChild>
             <Button mode="outlined" icon={() => <TrendingUp size={18} color="#2563EB" />}>
               Rotación y Marketing IA (RF-26/28)

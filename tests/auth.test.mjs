@@ -6,17 +6,29 @@ import { loadTsModule } from "./load-ts.mjs";
 
 const root = new URL("..", import.meta.url).pathname.replace(/^\/(\w):/, "$1:");
 
-test("role policy fails closed and keeps non-admin mutations on their assigned branch", () => {
+test("role policy keeps admin purely analytical with user management and confines staff to their branch", () => {
   const { branchScopeFor, can, canUseBranch } = loadTsModule("src/features/auth/lib/permissions.ts");
 
-  assert.equal(branchScopeFor("admin", "sales.write"), "any");
+  // Admin has NO operational mutation abilities (purely analytical + user governance)
+  assert.equal(branchScopeFor("admin", "sales.write"), "none");
+  assert.equal(branchScopeFor("admin", "inventory.write"), "none");
+  assert.equal(branchScopeFor("admin", "products.write"), "none");
+  assert.equal(branchScopeFor("admin", "movements.write"), "none");
+  assert.equal(branchScopeFor("admin", "dashboard.read"), "any");
+  assert.equal(branchScopeFor("admin", "inventory.read"), "any");
+  assert.equal(branchScopeFor("admin", "users.manage"), "any");
+  assert.equal(can("admin", "sales.write"), false);
+  assert.equal(can("admin", "users.manage"), true);
+
+  // Operational roles maintain their branch-scoped mutations
   assert.equal(branchScopeFor("vendedora", "sales.write"), "own");
   assert.equal(branchScopeFor("reponedora", "sales.write"), "none");
   assert.equal(branchScopeFor("marketing", "dashboard.read"), "aggregate");
   assert.equal(can(undefined, "sales.write"), false);
   assert.equal(canUseBranch("vendedora", "sales.write", 2, 1), false);
   assert.equal(canUseBranch("vendedora", "sales.write", 1, 1), true);
-  assert.equal(canUseBranch("admin", "sales.write", 2, null), true);
+  assert.equal(canUseBranch("admin", "dashboard.read", 2, null), true);
+  assert.equal(canUseBranch("admin", "sales.write", 2, null), false);
 });
 
 test("session sync controller rejects stale profile installs after a user switch", () => {
