@@ -2,6 +2,7 @@ import { z } from "zod";
 import { supabase } from "../../../shared/lib/supabase";
 import { fetchAllPages } from "../../../shared/lib/pagination";
 import { ProductoLookupError, ProductoNoEncontradoError } from "../lib/productLookupErrors";
+import type { Database } from "../../../shared/types/database.types";
 import type {
   NuevoProductoParams,
   Producto,
@@ -92,6 +93,33 @@ export async function buscarProductoPorId(id: number): Promise<Producto> {
   return data as Producto;
 }
 
+export async function buscarProductosAsistente(query: string, limite = 10): Promise<Producto[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  // Búsqueda rápida por código exacto o prefijo
+  const { data: codeMatches, error: codeErr } = await supabase
+    .from("productos")
+    .select("*")
+    .or(`codigo.ilike.${q}%,codigo.ilike.%${q}%`)
+    .limit(limite);
+
+  if (codeErr) throw new Error(codeErr.message);
+  if (codeMatches && codeMatches.length > 0) {
+    return codeMatches as Producto[];
+  }
+
+  // Búsqueda por nombre o categoría
+  const { data: textMatches, error: textErr } = await supabase
+    .from("productos")
+    .select("*")
+    .or(`nombre.ilike.%${q}%,categoria.ilike.%${q}%`)
+    .limit(limite);
+
+  if (textErr) throw new Error(textErr.message);
+  return (textMatches ?? []) as Producto[];
+}
+
 export async function obtenerCategoriasProductos(): Promise<string[]> {
   const rows = await fetchAllPages(async (from, to) => {
     const { data, error } = await supabase
@@ -111,6 +139,7 @@ export const ActualizarProductoSchema = z.object({
   codigo: z.string().trim().min(1, "El código es obligatorio.").max(255),
   categoria: z.string().trim().min(1, "La categoría es obligatoria.").max(255),
   precio: z.number().finite().nonnegative("El precio debe ser mayor o igual a 0."),
+  stock_minimo: z.number().int().nonnegative("El stock mínimo debe ser mayor o igual a 0.").optional(),
 });
 
 export type ActualizarProductoParams = z.infer<typeof ActualizarProductoSchema>;
@@ -118,15 +147,20 @@ export type ActualizarProductoParams = z.infer<typeof ActualizarProductoSchema>;
 export async function actualizarProducto(id: number, params: ActualizarProductoParams): Promise<Producto> {
   const productId = z.number().int().positive().parse(id);
   const input = ActualizarProductoSchema.parse(params);
+  const updatePayload: Database["public"]["Tables"]["productos"]["Update"] = {
+    nombre: input.nombre,
+    codigo: input.codigo,
+    categoria: input.categoria,
+    precio: input.precio,
+    updated_at: new Date().toISOString(),
+  };
+  if (input.stock_minimo !== undefined) {
+    updatePayload.stock_minimo = input.stock_minimo;
+  }
+
   const { data, error } = await supabase
     .from("productos")
-    .update({
-      nombre: input.nombre,
-      codigo: input.codigo,
-      categoria: input.categoria,
-      precio: input.precio,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", productId)
     .select()
     .single();

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 import { Plus, Search, X } from "lucide-react-native";
 import { Link, router, useFocusEffect } from "expo-router";
-import { ActivityIndicator, Button, Searchbar, Text } from "react-native-paper";
+import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
+import { AppSearchbar } from "../../../shared/components/AppSearchbar";
 import { colors, spacing } from "../../../shared/theme";
 import { ProductCard } from "../components/ProductCard";
 import { useProductos } from "../hooks/useProductos";
@@ -62,12 +63,11 @@ export function ProductosScreen() {
                 Registrar producto
               </Button>
             </Link>
-            <Searchbar
+            <AppSearchbar
               value={search}
               onChangeText={setSearch}
               placeholder="Buscar por nombre, código o categoría"
-              icon={() => <Search size={20} color={colors.textSecondary} />}
-              clearIcon={() => <X size={20} color={colors.textSecondary} />}
+              scanTitle="Buscar producto en catálogo"
               style={styles.search}
             />
             <View style={styles.chips}>

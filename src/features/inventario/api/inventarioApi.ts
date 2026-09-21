@@ -63,6 +63,33 @@ export async function obtenerInventario(sucursalId: number): Promise<InventarioI
   return rows.map(normalizeInventoryRow);
 }
 
+export async function obtenerStockDeProducto(productoId: number): Promise<Array<{
+  sucursalId: number;
+  sucursalNombre: string;
+  cantidad: number;
+}>> {
+  const pId = z.number().int().positive().parse(productoId);
+  const { data, error } = await supabase
+    .from("inventarios")
+    .select(`
+      sucursal_id,
+      cantidad,
+      sucursal:sucursales(id, nombre)
+    `)
+    .eq("producto_id", pId)
+    .order("sucursal_id", { ascending: true });
+
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row: any) => ({
+    sucursalId: row.sucursal_id,
+    sucursalNombre: Array.isArray(row.sucursal)
+      ? row.sucursal[0]?.nombre ?? `Sucursal ${row.sucursal_id}`
+      : row.sucursal?.nombre ?? `Sucursal ${row.sucursal_id}`,
+    cantidad: row.cantidad,
+  }));
+}
+
 export async function obtenerStockMultiSucursal(): Promise<InventarioItem[]> {
   const branches = await obtenerSucursales();
   const inventories = await Promise.all(branches.map((branch) => obtenerInventario(branch.id)));
