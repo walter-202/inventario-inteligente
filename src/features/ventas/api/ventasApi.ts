@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { supabase } from "../../../shared/lib/supabase";
-import { PAYMENT_METHODS, type RegistrarVentaParams, type VentaRegistrada, type VentaResumen } from "../../../shared/types/domain";
+import {
+  PAYMENT_METHODS,
+  type AnularVentaParams,
+  type RegistrarVentaParams,
+  type VentaAnuladaRespuesta,
+  type VentaRegistrada,
+  type VentaResumen,
+} from "../../../shared/types/domain";
 
 const saleInputSchema = z.object({
   sucursal_id: z.number().int().positive(),
@@ -14,10 +21,15 @@ const saleInputSchema = z.object({
 
 export const RegistrarVentaSchema = saleInputSchema;
 
+export const AnularVentaSchema = z.object({
+  venta_id: z.number().int().positive("ID de venta inválido"),
+  motivo: z.string().min(3, "El motivo debe tener al menos 3 caracteres").max(250, "Máximo 250 caracteres"),
+});
+
 export async function obtenerVentas(sucursalId?: number): Promise<VentaResumen[]> {
   let query = supabase
     .from("ventas")
-    .select("id, sucursal_id, fecha, total, metodo_pago")
+    .select("id, sucursal_id, fecha, total, metodo_pago, estado, motivo_anulacion, fecha_anulacion")
     .order("fecha", { ascending: false })
     .order("id", { ascending: false })
     .limit(50);
@@ -37,3 +49,14 @@ export async function registrarVenta(params: RegistrarVentaParams): Promise<Vent
   if (error) throw new Error(error.message);
   return data as unknown as VentaRegistrada;
 }
+
+export async function anularVenta(params: AnularVentaParams): Promise<VentaAnuladaRespuesta> {
+  const input = AnularVentaSchema.parse(params);
+  const { data, error } = await supabase.rpc("anular_venta_atomic", {
+    p_venta_id: input.venta_id,
+    p_motivo: input.motivo.trim(),
+  });
+  if (error) throw new Error(error.message);
+  return data as unknown as VentaAnuladaRespuesta;
+}
+

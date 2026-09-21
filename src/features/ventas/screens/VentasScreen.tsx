@@ -2,22 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { ScanBarcode, Search, X } from "lucide-react-native";
-import { Button, Card, HelperText, Searchbar, Snackbar, Text } from "react-native-paper";
+import { Button, Card, Chip, HelperText, Snackbar, Text } from "react-native-paper";
 
 import { AppHeader } from "../../../shared/components/AppHeader";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
+import { AppSearchbar } from "../../../shared/components/AppSearchbar";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
 import { extraerMensajeError, formatearPrecio } from "../../../shared/lib/utils";
 import { colors, spacing } from "../../../shared/theme";
-import type { InventarioItem, PaymentMethod, Producto } from "../../../shared/types/domain";
+import type { InventarioItem, PaymentMethod, Producto, VentaResumen } from "../../../shared/types/domain";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
 import { useProductos } from "../../productos/hooks/useProductos";
+import { buscarProductoPorCodigo } from "../../productos/api/productosApi";
 import { PaymentSelector } from "../components/PaymentSelector";
 import { SaleCart, type CartItem } from "../components/SaleCart";
 import { SaleSummaryModal } from "../components/SaleSummaryModal";
+import { SaleCancelDialog } from "../components/SaleCancelDialog";
 import { useProcesarVenta } from "../hooks/useProcesarVenta";
 import { useVentas } from "../hooks/useVentas";
+import { useAnularVenta } from "../hooks/useAnularVenta";
 import {
   limpiarLotePendiente,
   limpiarProductoPendiente,
@@ -37,6 +41,7 @@ export function VentasScreen() {
 }
 
 function VentasContent() {
+  const { profile } = useAuth();
   const { activeBranchId, canChangeBranch, selectBranch } = useActiveBranch();
   const branches = useSucursales();
   const stock = useStockMultiSucursal();
@@ -46,6 +51,7 @@ function VentasContent() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [payment, setPayment] = useState<PaymentMethod>("efectivo");
   const [summaryVisible, setSummaryVisible] = useState(false);
+  const [cancelSaleTarget, setCancelSaleTarget] = useState<VentaResumen | null>(null);
   const [pendingProduct, setPendingProduct] = useState<Producto | null>(null);
   const [pendingBatch, setPendingBatch] = useState<ItemPendienteVenta[] | null>(null);
   const [pendingStockSnapshot, setPendingStockSnapshot] = useState<InventarioItem[] | null>(null);
@@ -54,6 +60,7 @@ function VentasContent() {
   const products = useProductos({ q: deferredSearch || undefined });
   const sales = useVentas(branchId ?? undefined);
   const mutation = useProcesarVenta();
+  const anularMutation = useAnularVenta();
   const selectedBranch = branchId;
 
   useEffect(() => {
@@ -139,6 +146,22 @@ function VentasContent() {
       return true;
     },
     [stock.data, stockFor],
+  );
+
+  const handleScanProduct = useCallback(
+    async (scannedCode: string) => {
+      try {
+        const found = await buscarProductoPorCodigo(scannedCode);
+        if (found) {
+          addProduct(found);
+        } else {
+          setSearch(scannedCode);
+        }
+      } catch {
+        setSearch(scannedCode);
+      }
+    },
+    [addProduct],
   );
 
   const addProductsBatch = useCallback(
@@ -266,10 +289,25 @@ function VentasContent() {
   const mutationError = mutation.error
     ? extraerMensajeError(mutation.error, "No se pudo registrar la venta.")
     : null;
+
+  const handleConfirmAnulacion = async (motivo: string) => {
+    if (!cancelSaleTarget) return;
+    const res = await anularMutation.mutateAsync({
+      venta_id: cancelSaleTarget.id,
+      motivo,
+    });
+    Alert.alert(
+      "Venta anulada con éxito (RF-17)",
+      `La Venta #${res.venta_id} fue anulada y se revirtieron ${res.items_revertidos} línea(s) de productos al stock de la sucursal.`,
+    );
+    void sales.refetch();
+    void stock.refetch();
+  };
+
   return (
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <AppHeader title="Ventas" subtitle="Punto de venta" />
+        <AppHeader title="Ventas" subtitle="Punto de venta y caja" />
         {refreshError ? (
           <View style={styles.refreshError}>
             <HelperText type="error" visible>
@@ -294,12 +332,12 @@ function VentasContent() {
             </Button>
           </Link>
         </View>
-        <Searchbar
+        <AppSearchbar
           value={search}
           onChangeText={setSearch}
-          placeholder="Buscar producto"
-          icon={() => <Search size={20} color={colors.textSecondary} />}
-          clearIcon={() => <X size={20} color={colors.textSecondary} />}
+          onScan={handleScanProduct}
+          placeholder="Buscar prenda, código o con IA..."
+          scanTitle="Escanear prenda para venta"
         />
         {results.map((product) => (
           <Card key={product.id} mode="outlined" style={styles.result} onPress={() => addProduct(product)}>
@@ -344,15 +382,60 @@ function VentasContent() {
           Registrar venta
         </Button>
         <Text variant="titleMedium" style={styles.section}>
-          Últimas ventas
+          Últimas ventas registradas
         </Text>
-        {sales.data?.slice(0, 5).map((sale) => (
-          <View key={sale.id} style={styles.saleRow}>
-            <Text>{new Date(sale.fecha).toLocaleDateString("es-BO")}</Text>
-            <Text>{sale.metodo_pago}</Text>
-            <Text style={styles.totalValue}>{formatearPrecio(sale.total)}</Text>
-          </View>
-        ))}
+        {sales.data?.slice(0, 10).map((sale) => {
+          const isAnulada = sale.estado === "anulada";
+          return (
+            <Card
+              key={sale.id}
+              mode="outlined"
+              style={[styles.saleCard, isAnulada && styles.saleCardAnulada]}
+            >
+              <Card.Content style={styles.saleCardContent}>
+                <View style={styles.saleInfo}>
+                  <View style={styles.saleHeaderRow}>
+                    <Text variant="titleSmall" style={[styles.saleTitle, isAnulada && styles.saleTitleAnulada]}>
+                      Venta #{sale.id}
+                    </Text>
+                    {isAnulada ? (
+                      <Chip compact style={styles.chipAnulada} textStyle={styles.chipTextAnulada}>
+                        ANULADA
+                      </Chip>
+                    ) : (
+                      <Chip compact style={styles.chipCompletada} textStyle={styles.chipTextCompletada}>
+                        COMPLETADA
+                      </Chip>
+                    )}
+                  </View>
+                  <Text variant="bodySmall" style={styles.muted}>
+                    {new Date(sale.fecha).toLocaleString("es-BO")} · Pago: {sale.metodo_pago}
+                  </Text>
+                  {isAnulada && sale.motivo_anulacion ? (
+                    <Text variant="bodySmall" style={styles.motivoAnuladaText}>
+                      Motivo: {sale.motivo_anulacion}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.saleActionWrap}>
+                  <Text style={[styles.totalValue, isAnulada && styles.totalValueAnulada]}>
+                    {formatearPrecio(sale.total)}
+                  </Text>
+                  {!isAnulada && can(profile?.rol, "sales.write") && (
+                    <Button
+                      compact
+                      mode="text"
+                      textColor="#DC2626"
+                      onPress={() => setCancelSaleTarget(sale)}
+                    >
+                      Anular
+                    </Button>
+                  )}
+                </View>
+              </Card.Content>
+            </Card>
+          );
+        })}
       </ScrollView>
       <SaleSummaryModal
         visible={summaryVisible}
@@ -363,6 +446,13 @@ function VentasContent() {
         error={mutationError}
         onDismiss={() => setSummaryVisible(false)}
         onConfirm={confirm}
+      />
+      <SaleCancelDialog
+        visible={cancelSaleTarget !== null}
+        sale={cancelSaleTarget}
+        onDismiss={() => setCancelSaleTarget(null)}
+        onConfirm={handleConfirmAnulacion}
+        loading={anularMutation.isPending}
       />
       <Snackbar visible={lineaBorrada !== null} onDismiss={() => setLineaBorrada(null)} action={{ label: "Deshacer", onPress: deshacerQuitar }}>
         Línea quitada del ticket.
@@ -401,6 +491,7 @@ const styles = StyleSheet.create({
   },
   section: {
     marginTop: spacing.md,
+    fontWeight: "700",
   },
   total: {
     marginTop: spacing.md,
@@ -414,11 +505,62 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: "700",
   },
-  saleRow: {
+  totalValueAnulada: {
+    color: "#94A3B8",
+    textDecorationLine: "line-through",
+  },
+  saleCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+  },
+  saleCardAnulada: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+    opacity: 0.85,
+  },
+  saleCardContent: {
     flexDirection: "row",
     justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingVertical: spacing.sm,
+    alignItems: "center",
+  },
+  saleInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  saleHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  saleTitle: {
+    fontWeight: "700",
+  },
+  saleTitleAnulada: {
+    color: "#64748B",
+  },
+  chipCompletada: {
+    backgroundColor: "#E8F5E9",
+  },
+  chipTextCompletada: {
+    color: "#2E7D32",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  chipAnulada: {
+    backgroundColor: "#FFEBEE",
+  },
+  chipTextAnulada: {
+    color: "#C62828",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  motivoAnuladaText: {
+    color: "#C62828",
+    fontStyle: "italic",
+  },
+  saleActionWrap: {
+    alignItems: "flex-end",
+    gap: 4,
   },
 });
+
