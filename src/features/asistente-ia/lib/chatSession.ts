@@ -65,6 +65,7 @@ export interface ChatState {
 export type ChatAction =
   | { type: "nueva-sesion"; session: ChatSession }
   | { type: "fijar-objetivo"; sessionId: string; objetivo: ObjetivoSesion; updatedAt: number }
+  | { type: "fijar-resumen"; sessionId: string; resumen: string; updatedAt: number }
   | { type: "agregar-mensaje"; sessionId: string; message: ChatMessage; updatedAt: number }
   | { type: "completar-sesion"; sessionId: string; resumen: string; updatedAt: number }
   | { type: "cancelar-sesion"; sessionId: string; updatedAt: number }
@@ -99,6 +100,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         sessions: state.sessions.map((item) =>
           item.id === action.sessionId ? { ...item, objetivo: action.objetivo, updatedAt: action.updatedAt } : item,
+        ),
+      };
+    }
+    case "fijar-resumen": {
+      const session = state.sessions.find((item) => item.id === action.sessionId);
+      if (!session) return state;
+      return {
+        ...state,
+        sessions: state.sessions.map((item) =>
+          item.id === action.sessionId ? { ...item, resumen: action.resumen, updatedAt: action.updatedAt } : item,
         ),
       };
     }

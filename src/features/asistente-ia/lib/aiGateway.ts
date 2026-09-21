@@ -9,12 +9,19 @@ import {
 } from "../../../shared/lib/secureKeyStore";
 import { AI_PROVIDERS, type AIProviderDefinition } from "./aiProviders";
 
+export interface AIMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export interface AICompletionOptions<T> {
   systemPrompt: string;
-  userMessage: string;
+  userMessage?: string;
+  messages?: AIMessage[];
   schema: z.ZodType<T>;
   preferredMode?: PreferredMode;
   timeoutMs?: number;
+  imageBase64?: string;
 }
 
 export interface AICompletionResult<T> {
@@ -40,8 +47,10 @@ async function callOpenAICompatible(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  userMessage: string,
+  userMessage: string | undefined,
+  messages: AIMessage[] | undefined,
   timeoutMs: number,
+  imageBase64?: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -57,12 +66,30 @@ async function callOpenAICompatible(
       headers["X-Title"] = "Lidemoda Mobile POS";
     }
 
+    const userMessageContent = imageBase64
+      ? [
+          { type: "text", text: userMessage ?? "" },
+          {
+            type: "image_url",
+            image_url: {
+              url: imageBase64.startsWith("data:")
+                ? imageBase64
+                : `data:image/jpeg;base64,${imageBase64}`,
+            },
+          },
+        ]
+      : (userMessage ?? "");
+
+    const formattedMessages = messages && messages.length > 0
+      ? [{ role: "system", content: systemPrompt }, ...messages]
+      : [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessageContent },
+        ];
+
     const body: Record<string, unknown> = {
       model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
+      messages: formattedMessages,
       temperature: 0,
       response_format: { type: "json_object" },
     };
@@ -99,23 +126,52 @@ async function callGemini(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  userMessage: string,
+  userMessage: string | undefined,
+  messages: AIMessage[] | undefined,
   timeoutMs: number,
+  imageBase64?: string,
 ): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const url = `${provider.baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+    const imagePart = imageBase64
+      ? {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: imageBase64.replace(/^data:image\/\w+;base64,/, ""),
+          },
+        }
+      : null;
+
+    const userParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      { text: `${systemPrompt}\n\n${userMessage ?? ""}` },
+    ];
+    if (imagePart) userParts.push(imagePart);
+
+    const contents = messages && messages.length > 0
+      ? [
+          { role: "user", parts: [{ text: `[System Instruction]\n${systemPrompt}` }] },
+          { role: "model", parts: [{ text: "Entendido. Operaré estrictamente bajo estas instrucciones." }] },
+          ...messages.map((m, idx) => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: (m.role === "user" && idx === messages.length - 1 && imagePart)
+              ? [{ text: m.content }, imagePart]
+              : [{ text: m.content }],
+          })),
+        ]
+      : [
+          {
+            parts: userParts,
+          },
+        ];
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: `${systemPrompt}\n\n${userMessage}` }],
-          },
-        ],
+        contents,
         generationConfig: {
           temperature: 0,
           responseMimeType: "application/json",
@@ -162,9 +218,9 @@ export async function testProviderConnection(
   try {
     let rawContent = "";
     if (provider.type === "openai-compatible") {
-      rawContent = await callOpenAICompatible(provider, apiKey, modelToUse, systemPrompt, userMessage, 8000);
+      rawContent = await callOpenAICompatible(provider, apiKey, modelToUse, systemPrompt, userMessage, undefined, 8000);
     } else {
-      rawContent = await callGemini(provider, apiKey, modelToUse, systemPrompt, userMessage, 8000);
+      rawContent = await callGemini(provider, apiKey, modelToUse, systemPrompt, userMessage, undefined, 8000);
     }
 
     const parsedJson = cleanAndParseJSON(rawContent);
@@ -186,7 +242,7 @@ export async function testProviderConnection(
 export async function completeChatJSON<T>(
   options: AICompletionOptions<T>,
 ): Promise<AICompletionResult<T>> {
-  const { systemPrompt, userMessage, schema, timeoutMs = 8000 } = options;
+  const { systemPrompt, userMessage, messages, schema, timeoutMs = 8000 } = options;
 
   const mode = options.preferredMode ?? (await getPreferredMode());
   if (mode === "heuristic") {
@@ -226,7 +282,9 @@ export async function completeChatJSON<T>(
           modelToUse,
           systemPrompt,
           userMessage,
+          messages,
           timeoutMs,
+          options.imageBase64,
         );
       } else {
         rawContent = await callGemini(
@@ -235,7 +293,9 @@ export async function completeChatJSON<T>(
           modelToUse,
           systemPrompt,
           userMessage,
+          messages,
           timeoutMs,
+          options.imageBase64,
         );
       }
 

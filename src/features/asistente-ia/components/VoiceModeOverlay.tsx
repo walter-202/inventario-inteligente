@@ -13,16 +13,14 @@ interface VoiceModeOverlayProps {
   interpreting: boolean;
   isAvailable: boolean;
   permissionGranted: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
+  onStart?: () => void;
+  onStop?: () => void;
   onSend: () => void;
   onClose: () => void;
   onRequestPermission: () => void;
 }
 
-/**
- * Símbolo de espera/escucha: barras que bailan mientras graba y quedan
- * quietas como indicador de "te escucho" cuando espera tu voz.
- */
 function WaveBars({ active }: { active: boolean }) {
   const bars = useRef(Array.from({ length: 7 }, () => new Animated.Value(0.35))).current;
 
@@ -59,10 +57,10 @@ const waveStyles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, height: 36 },
   bar: { width: 6, height: 30, borderRadius: 3, backgroundColor: colors.primary },
 });
+
 /**
- * Modo voz simple: orbe central para dictar, símbolo de espera animado,
- * texto en vivo y enviar. STT on-device del sistema (sin Whisper ni
- * multimodales); en Expo Go explica cómo seguir por texto.
+ * Modo voz fluido estilo ChatGPT: orbe central reactivo,
+ * detección de fin de voz con auto-envío inmediato al detener o terminar de hablar.
  */
 export function VoiceModeOverlay({
   visible,
@@ -72,11 +70,52 @@ export function VoiceModeOverlay({
   isAvailable,
   permissionGranted,
   onToggle,
+  onStart,
+  onStop,
   onSend,
   onClose,
   onRequestPermission,
 }: VoiceModeOverlayProps) {
   const pulse = useRef(new Animated.Value(1)).current;
+  const prevRecordingRef = useRef(recording);
+  const isCancelledRef = useRef(false);
+  const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reiniciar estado de cancelación cada vez que se abre el modal
+  useEffect(() => {
+    if (visible) {
+      isCancelledRef.current = false;
+    } else {
+      if (autoSendTimerRef.current) {
+        clearTimeout(autoSendTimerRef.current);
+        autoSendTimerRef.current = null;
+      }
+    }
+  }, [visible]);
+
+  // Auto-envío fluido: cuando el usuario termina de hablar y la grabación se apaga (VAD/isFinal)
+  useEffect(() => {
+    const wasRecording = prevRecordingRef.current;
+    prevRecordingRef.current = recording;
+
+    if (wasRecording && !recording && visible && !isCancelledRef.current) {
+      const text = transcript.trim();
+      if (text && !interpreting) {
+        autoSendTimerRef.current = setTimeout(() => {
+          if (!isCancelledRef.current) {
+            onSend();
+          }
+        }, 350);
+      }
+    }
+
+    return () => {
+      if (autoSendTimerRef.current) {
+        clearTimeout(autoSendTimerRef.current);
+        autoSendTimerRef.current = null;
+      }
+    };
+  }, [recording, visible, transcript, interpreting, onSend]);
 
   useEffect(() => {
     if (!visible || !recording) {
@@ -93,6 +132,47 @@ export function VoiceModeOverlay({
     return () => loop.stop();
   }, [visible, recording, pulse]);
 
+  const handleOrbPress = () => {
+    if (interpreting) return;
+
+    if (recording) {
+      // Al tocar detener: detener y enviar inmediatamente si ya hay texto (experiencia fluida estilo ChatGPT)
+      if (onStop) {
+        onStop();
+      } else if (onToggle) {
+        onToggle();
+      }
+
+      const text = transcript.trim();
+      if (text) {
+        if (autoSendTimerRef.current) {
+          clearTimeout(autoSendTimerRef.current);
+          autoSendTimerRef.current = null;
+        }
+        onSend();
+      }
+    } else {
+      if (onStart) {
+        onStart();
+      } else if (onToggle) {
+        onToggle();
+      }
+    }
+  };
+
+  const handleClose = () => {
+    isCancelledRef.current = true;
+    if (autoSendTimerRef.current) {
+      clearTimeout(autoSendTimerRef.current);
+      autoSendTimerRef.current = null;
+    }
+    if (recording) {
+      if (onStop) onStop();
+      else if (onToggle) onToggle();
+    }
+    onClose();
+  };
+
   if (!visible) return null;
   const canTalk = isAvailable && permissionGranted;
   return (
@@ -100,89 +180,89 @@ export function VoiceModeOverlay({
       <SafeAreaView edges={["top", "bottom"]} style={styles.safe}>
         <View style={styles.overlay}>
           <View style={styles.header}>
-        <Text variant="titleMedium" style={styles.title}>
-          Modo voz
-        </Text>
-        <IconButton icon={() => <X size={22} />} onPress={onClose} accessibilityLabel="Cerrar modo voz" />
-      </View>
+            <Text variant="titleMedium" style={styles.title}>
+              Modo voz
+            </Text>
+            <IconButton icon={() => <X size={22} />} onPress={handleClose} accessibilityLabel="Cerrar modo voz" />
+          </View>
 
-      {!isAvailable ? (
-        <View style={styles.notice}>
-          <Text variant="bodyMedium" style={styles.noticeText}>
-            El dictado por voz necesita un development build con el micrófono del sistema. Podés dictar en ese build o
-            escribir acá mismo y enviar.
+          {!isAvailable ? (
+            <View style={styles.notice}>
+              <Text variant="bodyMedium" style={styles.noticeText}>
+                El dictado por voz necesita un development build con el micrófono del sistema. Podés dictar en ese build o
+                escribir acá mismo y enviar.
+              </Text>
+            </View>
+          ) : !permissionGranted ? (
+            <View style={styles.notice}>
+              <Text variant="bodyMedium" style={styles.noticeText}>
+                Para dictar necesitamos permiso del micrófono.
+              </Text>
+              <Button mode="contained" onPress={onRequestPermission}>
+                Permitir micrófono
+              </Button>
+            </View>
+          ) : (
+            <Animated.View style={{ transform: [{ scale: pulse }] }}>
+              <Pressable
+                onPress={handleOrbPress}
+                style={[styles.orbHit, recording && styles.orbRecording]}
+                accessibilityRole="button"
+                accessibilityLabel={recording ? "Detener y enviar dictado" : "Iniciar dictado"}
+              >
+                <LinearGradient
+                  colors={[colors.primary, colors.secondary, colors.tertiary]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.orb}
+                >
+                  {recording ? <Square size={36} color={colors.white} /> : <Mic size={40} color={colors.white} />}
+                </LinearGradient>
+              </Pressable>
+            </Animated.View>
+          )}
+
+          {interpreting ? null : <WaveBars active={recording || (!transcript && canTalk)} />}
+
+          <Text variant="bodySmall" style={styles.status}>
+            {interpreting
+              ? "Interpretando…"
+              : recording
+                ? "Escuchando… tocá el orbe para enviar o terminá de hablar"
+                : transcript.trim()
+                  ? "Enviando mensaje…"
+                  : canTalk
+                    ? "Tocá el orbe y empezá a hablar"
+                    : "Texto reconocido"}
           </Text>
-        </View>
-      ) : !permissionGranted ? (
-        <View style={styles.notice}>
-          <Text variant="bodyMedium" style={styles.noticeText}>
-            Para dictar necesitamos permiso del micrófono.
-          </Text>
-          <Button mode="contained" onPress={onRequestPermission}>
-            Permitir micrófono
-          </Button>
-        </View>
-      ) : (
-        <Animated.View style={{ transform: [{ scale: pulse }] }}>
-          <Pressable
-            onPress={onToggle}
-            style={[styles.orbHit, recording && styles.orbRecording]}
-            accessibilityRole="button"
-            accessibilityLabel={recording ? "Detener dictado" : "Iniciar dictado"}
-          >
-            <LinearGradient
-              colors={[colors.primary, colors.secondary, colors.tertiary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.orb}
+
+          <ScrollView style={styles.transcriptBox} contentContainerStyle={styles.transcriptContent}>
+            {interpreting ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Text variant="bodyLarge" style={styles.transcript}>
+                {transcript || "—"}
+              </Text>
+            )}
+          </ScrollView>
+
+          <View style={styles.actions}>
+            <Button mode="outlined" onPress={handleClose} style={styles.actionButton}>
+              Cancelar
+            </Button>
+            <Button
+              mode="contained"
+              onPress={onSend}
+              loading={interpreting}
+              disabled={interpreting || !transcript.trim()}
+              style={styles.actionButton}
             >
-              {recording ? <Square size={36} color={colors.white} /> : <Mic size={40} color={colors.white} />}
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
-      )}
-
-      {interpreting ? null : <WaveBars active={recording || (!transcript && canTalk)} />}
-
-      <Text variant="bodySmall" style={styles.status}>
-        {interpreting
-          ? "Interpretando…"
-          : recording
-            ? "Escuchando… tocá el micrófono para terminar"
-            : transcript
-              ? "Revisá el texto y envialo"
-              : canTalk
-                ? "Tocá el micrófono y dictá la operación"
-                : "Texto reconocido"}
-      </Text>
-
-      <ScrollView style={styles.transcriptBox} contentContainerStyle={styles.transcriptContent}>
-        {interpreting ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : (
-          <Text variant="bodyLarge" style={styles.transcript}>
-            {transcript || "—"}
-          </Text>
-        )}
-      </ScrollView>
-
-      <View style={styles.actions}>
-        <Button mode="outlined" onPress={onClose} style={styles.actionButton}>
-          Cerrar
-        </Button>
-        <Button
-          mode="contained"
-          onPress={onSend}
-          loading={interpreting}
-          disabled={interpreting || !transcript.trim()}
-          style={styles.actionButton}
-        >
-          Usar este texto
-        </Button>
-      </View>
-      </View>
-    </SafeAreaView>
-  </Portal>
+              Enviar ahora
+            </Button>
+          </View>
+        </View>
+      </SafeAreaView>
+    </Portal>
   );
 }
 

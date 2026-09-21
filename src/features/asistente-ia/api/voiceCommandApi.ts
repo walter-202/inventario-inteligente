@@ -1,10 +1,17 @@
 import type { Producto } from "../../../shared/types/domain";
-import { buscarProductoPorCodigo, obtenerProductos } from "../../productos/api/productosApi";
+import { buscarProductoPorCodigo, buscarProductosAsistente } from "../../productos/api/productosApi";
 import { ProductoNoEncontradoError } from "../../productos/lib/productLookupErrors";
 import { matchProduct, normalizarCodigoSKU, pareceSKU } from "../lib/productMatching";
 import type { IntentoDesambiguacion } from "../lib/chatSession";
-import { interpretarTextoVoz, esFraseDeCorreccion, extraerCantidad, extraerFraseCorregida, limpiarNombreProducto, type ProductoInterpretado } from "./aiInterpretationService";
-import { obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
+import {
+  interpretarTextoVoz,
+  esFraseDeCorreccion,
+  extraerCantidad,
+  extraerFraseCorregida,
+  limpiarNombreProducto,
+  type ProductoInterpretado,
+} from "./aiInterpretationService";
+import { obtenerStockDeProducto } from "../../inventario/api/inventarioApi";
 import { obtenerDashboardMetrics } from "../../dashboard/api/dashboardApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
 
@@ -39,6 +46,7 @@ export interface StockSucursalDetalle {
 
 export type ResultadoInterpretacion =
   | { tipo: "aclaracion"; mensaje: string; pasosPensamiento?: string[] }
+  | { tipo: "conversacion"; mensaje: string; pasosPensamiento?: string[] }
   | { tipo: "registro_producto"; datos: RegistroProductoParsed; mensaje: string; pasosPensamiento?: string[] }
   | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean; pasosPensamiento?: string[] }
   | {
@@ -77,7 +85,6 @@ async function resolverCoincidencia(text: string): Promise<CoincidenciaProducto>
   if (!query) return { kind: "none" };
 
   // Vía rápida SKU: "jea 001" del STT → "JEA-001" → lookup exacto por código.
-  // Evita traer páginas de fuzzy cuando el usuario dictó el código.
   if (pareceSKU(query)) {
     const candidatosCodigo = Array.from(new Set([
       normalizarCodigoSKU(query).toUpperCase(),
@@ -96,15 +103,8 @@ async function resolverCoincidencia(text: string): Promise<CoincidenciaProducto>
   }
 
   let products: Producto[] = [];
-  let page = 1;
-
   try {
-    while (true) {
-      const result = await obtenerProductos({ q: query, page });
-      products.push(...result.data);
-      if (result.current_page >= result.last_page) break;
-      page += 1;
-    }
+    products = await buscarProductosAsistente(query, 12);
   } catch {
     throw new InterpretacionError("No se pudo buscar el producto. Revisá tu conexión y volvé a intentar.");
   }
@@ -128,28 +128,22 @@ function validateItems(response: { accion?: string; productos?: ProductoInterpre
   return valid.length === response.productos.length ? valid : undefined;
 }
 
-/** Contexto conversacional: último producto mencionado, para resolver correcciones ("sino 5"). */
+/** Contexto conversacional: último producto mencionado, historial y sucursales disponibles. */
 export interface VozContexto {
   ultimoProductoNombre?: string;
+  historial?: Array<{ role: "usuario" | "asistente"; texto: string }>;
+  sucursales?: string[];
 }
 
 /**
  * Arma la respuesta de stock para un producto ya elegido (vía directa o tras
- * desambiguar en el chat). Solo lectura: desglose por sucursal + mensaje.
+ * desambiguar en el chat). Consulta directa indexada sin descargar todo el inventario.
  */
 export async function consultarStockDe(
   product: Producto,
   sucursalMencionada?: string,
 ): Promise<Extract<ResultadoInterpretacion, { tipo: "consulta_stock" }>> {
-  const multiStock = await obtenerStockMultiSucursal();
-  const productRows = multiStock.filter((item) => item.producto_id === product.id);
-
-  const desglose: StockSucursalDetalle[] = productRows.map((item) => ({
-    sucursalId: item.sucursal_id,
-    sucursalNombre: item.sucursal.nombre,
-    cantidad: item.cantidad,
-  }));
-
+  const desglose: StockSucursalDetalle[] = await obtenerStockDeProducto(product.id);
   const stockTotal = desglose.reduce((sum, item) => sum + item.cantidad, 0);
   const sucursalFiltro = sucursalMencionada?.toLowerCase().trim();
 
@@ -224,9 +218,21 @@ export async function interpretarVoz(texto: string, contexto?: VozContexto): Pro
 
   let response;
   try {
-    response = await interpretarTextoVoz(phrase);
+    response = await interpretarTextoVoz(phrase, {
+      historial: contexto?.historial,
+      sucursales: contexto?.sucursales,
+    });
   } catch {
     throw new InterpretacionError("No se pudo interpretar la operación.");
+  }
+
+  // 0. Conversational intent (saludos, asistencia general, dudas)
+  if (response.accion === "conversacion") {
+    return {
+      tipo: "conversacion",
+      mensaje: response.respuestaConversacional || "¡Hola! Estoy listo para ayudarte a registrar ventas, consultar stock de prendas en sucursales o revisar las ventas de hoy. ¿En qué te ayudo?",
+      pasosPensamiento: ["Interacción conversacional fluida"],
+    };
   }
 
   // 1. Stock inquiry

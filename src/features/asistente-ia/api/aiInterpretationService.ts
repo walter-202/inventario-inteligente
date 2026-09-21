@@ -2,13 +2,21 @@ import { z } from "zod";
 import { completeChatJSON } from "../lib/aiGateway";
 
 export const VoiceInterpretationSchema = z.object({
-  accion: z.enum(["venta", "consulta_stock", "consulta_ventas", "registro_producto", "desconocida"]),
+  accion: z.enum([
+    "venta",
+    "consulta_stock",
+    "consulta_ventas",
+    "registro_producto",
+    "conversacion",
+    "desconocida",
+  ]),
   productos: z.array(z.object({ producto: z.string().trim().min(1), cantidad: z.number().int().positive() })).default([]),
   consulta: z.object({
     producto: z.string().nullable().optional(),
     sucursal: z.string().nullable().optional(),
     periodo: z.string().nullable().optional(),
   }).optional(),
+  respuestaConversacional: z.string().optional(),
 });
 export type ProductoInterpretado = z.infer<typeof VoiceInterpretationSchema>["productos"][number];
 export type RespuestaInterpretacion = z.infer<typeof VoiceInterpretationSchema>;
@@ -83,7 +91,7 @@ export function limpiarNombreProducto(nombre: string): string {
     .trim();
 }
 
-const KNOWN_BRANCHES = [
+export const KNOWN_BRANCHES = [
   "san miguel",
   "calacoto",
   "comercio",
@@ -95,16 +103,26 @@ const KNOWN_BRANCHES = [
   "equipetrol",
 ];
 
-function extractSucursalMention(text: string): string | null {
+function extractSucursalMention(text: string, branches: string[] = KNOWN_BRANCHES): string | null {
   const normalized = text.toLowerCase();
-  for (const branch of KNOWN_BRANCHES) {
-    if (normalized.includes(branch)) return branch;
+  for (const branch of branches) {
+    if (normalized.includes(branch.toLowerCase())) return branch;
   }
   return null;
 }
 
-export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
+export function interpretarHeuristica(texto: string, branches: string[] = KNOWN_BRANCHES): RespuestaInterpretacion {
   const normalized = texto.toLowerCase().trim();
+
+  // 0. Conversational greetings
+  const saludos = ["hola", "buen dia", "buenos dias", "buenas tardes", "buenas noches", "que tal", "ayuda", "gracias"];
+  if (saludos.some((s) => normalized === s || normalized.startsWith(`${s} `) || normalized.endsWith(` ${s}`))) {
+    return VoiceInterpretationSchema.parse({
+      accion: "conversacion",
+      productos: [],
+      respuestaConversacional: "¡Hola! Estoy listo para ayudarte a registrar ventas, consultar stock de prendas en sucursales o revisar las ventas de hoy. ¿En qué te ayudo?",
+    });
+  }
 
   // 1. Sales query intent (e.g. "¿cuánto se vendió hoy?", "resumen de ventas")
   const salesQueryWords = [
@@ -120,7 +138,7 @@ export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
     "cuánto fue la venta",
   ];
   if (salesQueryWords.some((word) => normalized.includes(word))) {
-    const sucursal = extractSucursalMention(normalized);
+    const sucursal = extractSucursalMention(normalized, branches);
     return VoiceInterpretationSchema.parse({
       accion: "consulta_ventas",
       productos: [],
@@ -152,7 +170,7 @@ export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
     "hay de",
   ];
   if (stockQueryWords.some((word) => normalized.includes(word))) {
-    const sucursal = extractSucursalMention(normalized);
+    const sucursal = extractSucursalMention(normalized, branches);
     let clean = normalized;
     for (const word of stockQueryWords) {
       clean = clean.replace(new RegExp(`(?:¿)?\\s*${word}\\s*(?:de|del|en|para)?`, "gi"), " ");
@@ -178,7 +196,6 @@ export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
   }
 
   // 2b. Catalog registration intent (e.g. "quiero registrar una prenda nueva...").
-  // Esto NO es una venta: se redirige a la pantalla de alta de catálogo.
   const registroMarkers = [
     "prenda nueva",
     "producto nuevo",
@@ -201,7 +218,6 @@ export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
   }
 
   // 3. POS sale intent (e.g. "vender dos chompas", "lleva un vestido")
-  // Si es corrección ("sino 5", "mejor 3"), se interpreta solo la última intención.
   const fraseVenta = extraerFraseCorregida(texto);
   const saleWords = ["vender", "venta", "lleva", "cobrar", "anotar", "pedido", "registrar"];
   const hasSaleIntent = saleWords.some((word) => fraseVenta.toLowerCase().includes(word));
@@ -224,38 +240,65 @@ export function interpretarHeuristica(texto: string): RespuestaInterpretacion {
   });
 }
 
+export interface OpcionesInterpretacion {
+  historial?: Array<{ role: "usuario" | "asistente"; texto: string }>;
+  sucursales?: string[];
+}
+
 /**
  * Interprets voice text for point-of-sale commands and Q&A via the multi-provider AI Gateway
- * with local heuristic fallback.
+ * with local heuristic fallback. Supports multi-turn contextual memory and dynamic branches.
  */
-export async function interpretarTextoVoz(texto: string): Promise<RespuestaInterpretacion> {
+export async function interpretarTextoVoz(
+  texto: string,
+  opciones?: OpcionesInterpretacion,
+): Promise<RespuestaInterpretacion> {
   const phrase = texto.trim();
   if (!phrase) return { accion: "desconocida", productos: [] };
 
+  const branches = opciones?.sucursales && opciones.sucursales.length > 0
+    ? opciones.sucursales
+    : KNOWN_BRANCHES;
+  const branchesList = branches.join(", ");
+
   try {
-    const prompt = `Eres el asistente inteligente de voz de Lidemoda (tienda de moda boliviana).
-Analiza la frase y responde ÚNICAMENTE un objeto JSON válido con este esquema exacto:
+    const prompt = `Eres el asistente inteligente de Lidemoda (tienda de moda boliviana).
+Tu objetivo es ayudar a los vendedores a registrar ventas, consultar stock por sucursales, ver ventas de la jornada o responder dudas del sistema.
+IMPORTANTE: Mantené el hilo de la conversación previa. Si el usuario hace una pregunta de seguimiento ("¿y en Calacoto?", "vendé 2 de esas", "a cuánto está?"), utilizá el contexto y entidades mencionadas en los mensajes anteriores.
+
+Sucursales registradas: ${branchesList}.
+
+Respondé ÚNICAMENTE un objeto JSON válido con este esquema exacto:
 {
-  "accion": "venta" | "consulta_stock" | "consulta_ventas" | "registro_producto" | "desconocida",
+  "accion": "venta" | "consulta_stock" | "consulta_ventas" | "registro_producto" | "conversacion" | "desconocida",
   "productos": [{"producto": "nombre o código", "cantidad": 1}],
   "consulta": {
     "producto": "nombre o código del producto consultado o null",
-    "sucursal": "nombre de la sucursal mencionada (ej: Central, San Miguel, Calacoto, Comercio, Ceja) o null",
+    "sucursal": "nombre de la sucursal mencionada o null",
     "periodo": "hoy" | "semana" | "mes" | null
-  }
+  },
+  "respuestaConversacional": "Mensaje amable cuando accion='conversacion' o para acompañar la acción"
 }
 Reglas:
-- Si el usuario pide vender, cobrar o llevar prendas: accion="venta", productos=[...].
-- Si la frase trae una CORRECCIÓN (contiene "sino", "si no", "mejor", "corrige", "cambia", "digo", "no eran"): interpretá SOLO la última intención e ignorá cantidades y productos mencionados antes del marcador.
-- Ignorá palabras de relleno en el nombre del producto: "unidades", "unidad", "uds", "piezas", "prendas", "de venta", "de compra", "para vender" (ej: "5 unidades de venta" → cantidad 5, sin nombre).
-- Si el usuario pregunta por stock, existencia o disponibilidad (ej: "¿cuánto stock hay de X?", "¿cuántas chompas quedan en San Miguel?"): accion="consulta_stock", consulta.producto=nombre/código, consulta.sucursal=sucursal o null.
-- Si el usuario pregunta por ventas del día o dinero recaudado (ej: "¿cuánto vendimos hoy?", "resumen de ventas"): accion="consulta_ventas", consulta.periodo="hoy", consulta.sucursal=sucursal o null.
-- Si el usuario quiere DAR DE ALTA una prenda en el catálogo (ej: "quiero registrar una prenda nueva", "agregar un producto al catálogo", dicta nombre/código/precio/stock de algo nuevo): accion="registro_producto". Ojo: "registrar una venta" o "vender" SÍ es venta, no registro.
-- Si la frase no es ninguna de las anteriores: accion="desconocida", productos=[].`;
+- Si el usuario pide vender, cobrar o llevar prendas: accion="venta", productos=[...]. Si no repite el producto pero venían hablando de uno, usa ese producto previo.
+- Si la frase trae una CORRECCIÓN ("sino", "mejor", "cambia", "eran 2"): interpretá la última cantidad o producto deseado.
+- Ignorá palabras de relleno: "unidades", "piezas", "de venta".
+- Si consulta stock, existencias o si queda alguna prenda: accion="consulta_stock", consulta.producto=nombre/código, consulta.sucursal=sucursal o null. Si solo dice "¿y en Central?", conserva el producto anterior y cambia la sucursal.
+- Si consulta ventas del día o recaudación: accion="consulta_ventas", consulta.periodo="hoy", consulta.sucursal=sucursal o null.
+- Si quiere DAR DE ALTA una prenda nueva en catálogo: accion="registro_producto".
+- Si saluda ("hola", "buen día"), agradece ("gracias", "listo") o hace una pregunta general ("¿qué podés hacer?"): accion="conversacion", respuestaConversacional="...".
+- Si no es ninguna de las anteriores: accion="desconocida", productos=[].`;
+
+    const historyMessages: Array<{ role: "user" | "assistant"; content: string }> = (opciones?.historial ?? [])
+      .slice(-8)
+      .map((msg) => ({
+        role: msg.role === "usuario" ? "user" as const : "assistant" as const,
+        content: msg.texto,
+      }));
 
     const result = await completeChatJSON({
       systemPrompt: prompt,
-      userMessage: `Frase: "${phrase}"`,
+      messages: [...historyMessages, { role: "user", content: `Mensaje del usuario: "${phrase}"` }],
       schema: VoiceInterpretationSchema,
     });
 
@@ -269,5 +312,5 @@ Reglas:
     console.warn("AI gateway fallback to local interpreter for voice pos", error);
   }
 
-  return interpretarHeuristica(phrase);
+  return interpretarHeuristica(phrase, branches);
 }

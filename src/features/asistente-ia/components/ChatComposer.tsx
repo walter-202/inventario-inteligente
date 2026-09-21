@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, HelperText, IconButton, Text, TextInput } from "react-native-paper";
-import { AudioLines, Mic, Send, Square } from "lucide-react-native";
+import { AudioLines, Mic, ScanBarcode, Send, Square } from "lucide-react-native";
 import { SuggestionChips } from "./SuggestionChips";
+import { CameraScanModal } from "../../../shared/components/CameraScanModal";
 import { colors, spacing } from "../../../shared/theme";
 
 interface ChatComposerProps {
@@ -18,6 +20,7 @@ interface ChatComposerProps {
   onVoiceMode: () => void;
   onRequestPermission?: () => void;
   showSuggestions?: boolean;
+  suggestions?: string[];
 }
 
 const SUGERENCIAS = [
@@ -46,7 +49,10 @@ export function ChatComposer({
   onVoiceMode,
   onRequestPermission,
   showSuggestions = false,
+  suggestions,
 }: ChatComposerProps) {
+  const [scannerVisible, setScannerVisible] = useState(false);
+
   return (
     <View style={styles.box}>
       {permissionDenied || permissionError ? (
@@ -60,7 +66,7 @@ export function ChatComposer({
         </View>
       ) : null}
       {showSuggestions ? (
-        <SuggestionChips suggestions={SUGERENCIAS} onSelect={onTranscriptChange} />
+        <SuggestionChips suggestions={suggestions && suggestions.length > 0 ? suggestions : SUGERENCIAS} onSelect={onTranscriptChange} />
       ) : null}
       <View style={styles.row}>
         <IconButton
@@ -77,6 +83,13 @@ export function ChatComposer({
           value={transcript}
           onChangeText={onTranscriptChange}
           onSubmitEditing={onSend}
+          right={
+            <TextInput.Icon
+              icon={() => <ScanBarcode size={20} color={colors.primary} />}
+              onPress={() => setScannerVisible(true)}
+              accessibilityLabel="Escanear código de barras con la cámara"
+            />
+          }
         />
         <IconButton
           mode="outlined"
@@ -95,6 +108,15 @@ export function ChatComposer({
       <HelperText type="error" visible={Boolean(error)}>
         {error}
       </HelperText>
+
+      <CameraScanModal
+        visible={scannerVisible}
+        onClose={() => setScannerVisible(false)}
+        onScan={(code) => {
+          onTranscriptChange(`Consultar stock de ${code}`);
+        }}
+        title="Escanear prenda para consultar"
+      />
     </View>
   );
 }

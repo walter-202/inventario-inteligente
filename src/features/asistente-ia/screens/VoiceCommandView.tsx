@@ -28,6 +28,7 @@ import {
   consultarStockDe,
   type LineaInterpretada,
   type ResultadoInterpretacion,
+  type VozContexto,
 } from "../api/voiceCommandApi";
 import type { Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
@@ -107,11 +108,26 @@ export function VoiceCommandView() {
     return map;
   }, [stock.data, activeBranch]);
 
+  const contextualSuggestions = useMemo(() => {
+    if (lastLines[0]?.producto) {
+      const p = lastLines[0].producto;
+      return [
+        `Vender 1 ${p.nombre}`,
+        `¿Cuánto stock hay de ${p.codigo}?`,
+        `¿Cuánto queda en Central?`,
+        `¿Cuánto se vendió hoy?`,
+      ];
+    }
+    return undefined;
+  }, [lastLines]);
+
   const scrollToEnd = () => requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
 
   /** Sesión activa o una nueva (objetivo indefinido hasta interpretar). */
   const asegurarSesion = (): string => {
-    if (chat.activeSessionId) return chat.activeSessionId;
+    const active = chat.sessions.find((s) => s.id === chat.activeSessionId);
+    if (active && active.estado === "activa") return active.id;
+
     const session: ChatSession = {
       id: nextId("sesion"),
       objetivo: "indefinido",
@@ -262,7 +278,8 @@ export function VoiceCommandView() {
           total: consulta.stockTotal,
         },
       });
-      dispatch({ type: "completar-sesion", sessionId, resumen: `Stock ${producto.nombre} (${consulta.stockTotal})`, updatedAt: ahora() });
+      setLastLines([{ producto, cantidadSolicitada: 1 }]);
+      dispatch({ type: "fijar-resumen", sessionId, resumen: `Stock ${producto.nombre} (${consulta.stockTotal})`, updatedAt: ahora() });
     } catch (error) {
       agregar(sessionId, {
         role: "asistente",
@@ -279,12 +296,26 @@ export function VoiceCommandView() {
     setInspectingId(null);
     const sessionId = asegurarSesion();
     agregar(sessionId, { role: "usuario", texto });
+    voice.setTranscript("");
     setPendingConfirmation(null);
     setPendingRegistration(null);
     setShortage(null);
     const startTime = Date.now();
     try {
-      const contexto = lastLines[0] ? { ultimoProductoNombre: lastLines[0].producto.nombre } : undefined;
+      const activeMessages = chat.messages[sessionId] ?? [];
+      const historial = activeMessages.map((m) => ({
+        role: m.role,
+        texto: m.texto,
+      }));
+      const sucursalesDisponibles = (branches.data ?? []).map((b) => b.nombre);
+      const ultimoProducto = lastLines[0]?.producto?.nombre;
+
+      const contexto: VozContexto = {
+        ultimoProductoNombre: ultimoProducto,
+        historial,
+        sucursales: sucursalesDisponibles,
+      };
+
       const result: ResultadoInterpretacion = await voice.interpret(contexto);
       const durationMs = Date.now() - startTime;
       if (result.tipo === "aclaracion") {
@@ -295,6 +326,17 @@ export function VoiceCommandView() {
           thoughts: result.pasosPensamiento,
           durationMs,
         });
+        return;
+      }
+      if (result.tipo === "conversacion") {
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "info",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+        });
+        voice.setTranscript("");
         return;
       }
       if (result.tipo === "registro_producto") {
@@ -332,7 +374,8 @@ export function VoiceCommandView() {
               total: result.stockTotal,
             },
           });
-          dispatch({ type: "completar-sesion", sessionId, resumen: `Stock ${result.producto.nombre} (${result.stockTotal})`, updatedAt: ahora() });
+          setLastLines([{ producto: result.producto, cantidadSolicitada: 1 }]);
+          dispatch({ type: "fijar-resumen", sessionId, resumen: `Stock ${result.producto.nombre} (${result.stockTotal})`, updatedAt: ahora() });
         } else {
           agregar(sessionId, {
             role: "asistente",
@@ -343,7 +386,7 @@ export function VoiceCommandView() {
             attachment: { kind: "consulta-ventas", totalVentas: result.totalVentas, cantidadVentas: result.cantidadVentas },
           });
           dispatch({
-            type: "completar-sesion",
+            type: "fijar-resumen",
             sessionId,
             resumen: `Ventas hoy Bs ${result.totalVentas.toFixed(2)}`,
             updatedAt: ahora(),
@@ -774,7 +817,8 @@ export function VoiceCommandView() {
             onSend={() => void enviar()}
             onVoiceMode={abrirModoVoz}
             onRequestPermission={voice.requestPermission}
-            showSuggestions={visibleMessages.length === 0}
+            showSuggestions={visibleMessages.length === 0 || Boolean(contextualSuggestions)}
+            suggestions={contextualSuggestions}
           />
         )}
         <SessionDrawer
@@ -795,9 +839,13 @@ export function VoiceCommandView() {
           interpreting={voice.interpreting}
           isAvailable={voice.isAvailable}
           permissionGranted={voice.permission?.granted === true}
-          onToggle={voice.recording ? voice.stop : voice.start}
+          onStart={voice.start}
+          onStop={voice.stop}
           onSend={enviarDesdeVoz}
-          onClose={() => setVoiceMode(false)}
+          onClose={() => {
+            if (voice.recording) voice.stop();
+            setVoiceMode(false);
+          }}
           onRequestPermission={voice.requestPermission}
         />
         {confirmDialog}
