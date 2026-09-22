@@ -1,9 +1,10 @@
 import { StyleSheet, View } from "react-native";
 import { Button, Card, Text } from "react-native-paper";
-import { router } from "expo-router";
+import { useRouter } from "expo-router";
 
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { colors, spacing } from "../../../shared/theme";
+import { getPermissionDeniedNavigation } from "../lib/restrictedAccessNavigation";
 
 interface PermissionDeniedProps {
   title?: string;
@@ -14,6 +15,19 @@ export function PermissionDenied({
   title = "Acceso restringido",
   message = "Tu rol no tiene permiso para realizar esta operación.",
 }: PermissionDeniedProps) {
+  const router = useRouter();
+
+  function handleReturn() {
+    const navigation = getPermissionDeniedNavigation(router.canGoBack());
+
+    if (navigation.type === "back") {
+      router.back();
+      return;
+    }
+
+    router.replace(navigation.href);
+  }
+
   return (
     <ScreenContainer>
       <View style={styles.centered}>
@@ -21,7 +35,7 @@ export function PermissionDenied({
           <Card.Content style={styles.content}>
             <Text variant="titleLarge">{title}</Text>
             <Text style={styles.copy}>{message}</Text>
-            <Button mode="outlined" onPress={() => router.back()}>Volver</Button>
+            <Button mode="outlined" onPress={handleReturn}>Volver</Button>
           </Card.Content>
         </Card>
       </View>

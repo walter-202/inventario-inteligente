@@ -43,6 +43,18 @@ test("session sync controller rejects stale profile installs after a user switch
   assert.equal(controller.isCurrent(second), false);
 });
 
+test("restricted access navigation backs in-stack and replaces direct links with authenticated home", () => {
+  const { getPermissionDeniedNavigation } = loadTsModule(
+    "src/features/auth/lib/restrictedAccessNavigation.ts",
+  );
+
+  assert.deepEqual(getPermissionDeniedNavigation(true), { type: "back" });
+  assert.deepEqual(getPermissionDeniedNavigation(false), {
+    type: "replace",
+    href: "/",
+  });
+});
+
 test("the auth rollout is fail-closed and contains no credential provisioning", () => {
   const sql = readFileSync(join(root, "scripts", "auth-v1-rollout.sql"), "utf8");
   assert.match(sql, /AUTH_V1_PREFLIGHT_ABORT/);
