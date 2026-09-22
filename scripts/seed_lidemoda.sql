@@ -1,25 +1,32 @@
 -- ============================================================================
 -- Seed Data para Lidemoda - Inventario Inteligente (Supabase PostgreSQL)
--- Fecha: 16 de Septiembre de 2026
+-- Fecha: día actual de la base de datos
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
 -- 1. USUARIOS Y PERFILES (auth.users + auth.identities + public.perfiles)
--- Clave universal para pruebas: Lidemoda2026!
+-- Required session setting: seed.auth_password (set it outside this file).
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_pass text := crypt('Lidemoda2026!', gen_salt('bf'));
+  v_seed_password text := current_setting('seed.auth_password', true);
+  v_pass text;
   v_users record;
   v_id uuid;
 BEGIN
+  IF v_seed_password IS NULL OR length(v_seed_password) < 6 THEN
+    RAISE EXCEPTION 'seed.auth_password must be provided through the session environment';
+  END IF;
+  v_pass := extensions.crypt(v_seed_password, extensions.gen_salt('bf'));
   FOR v_users IN
     SELECT * FROM (VALUES
       ('admin.lidemoda@gmail.com', 'Administrador General', 'admin', NULL::bigint),
       ('encargada.comercio@gmail.com', 'Patricia Morales', 'encargada', 1::bigint),
       ('cajera.montenegro@gmail.com', 'Valeria Mendoza', 'cajera', 2::bigint),
       ('vendedora.ceja@gmail.com', 'Silvia Flores', 'vendedora', 3::bigint),
-      ('almacen.central@gmail.com', 'Carlos Quispe', 'almacen', 1::bigint)
+      ('almacen.central@gmail.com', 'Carlos Quispe', 'almacen', 1::bigint),
+      ('marketing.lidemoda@gmail.com', 'Equipo Marketing', 'marketing', NULL::bigint),
+      ('supervisora.regional@gmail.com', 'Supervisora Regional', 'admin', NULL::bigint)
     ) AS t(email, nombre, rol, sucursal_id)
   LOOP
     SELECT id INTO v_id FROM auth.users WHERE email = v_users.email;
@@ -149,7 +156,8 @@ END $$;
 -- ----------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_now timestamp with time zone := '2026-09-16 12:00:00-04:00'::timestamp with time zone;
+  v_now timestamp with time zone := date_trunc('day', now() AT TIME ZONE current_setting('TIMEZONE'))
+    AT TIME ZONE current_setting('TIMEZONE') + interval '12 hours';
   v_venta_id bigint;
   v_p1 bigint;
   v_p2 bigint;
@@ -162,76 +170,132 @@ BEGIN
   SELECT id INTO v_p3 FROM public.productos WHERE codigo = 'BLU-003';
   SELECT id INTO v_p4 FROM public.productos WHERE codigo = 'POL-005';
 
-  -- Venta 1: Hoy (2026-09-16) - Sucursal 1 (Comercio) - Efectivo (Total: 400.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (1, v_now - interval '2 hours', 'efectivo', 400.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 1: Hoy - Sucursal 1 (Comercio) - Efectivo (Total: 400.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 1
+      AND fecha = v_now - interval '2 hours'
+      AND metodo_pago = 'efectivo'
+      AND total = 400.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (1, v_now - interval '2 hours', 'efectivo', 400.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES
-    (v_venta_id, v_p1, 1, 180.00, now(), now()),
-    (v_venta_id, v_p2, 1, 220.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES
+      (v_venta_id, v_p1, 1, 180.00, now(), now()),
+      (v_venta_id, v_p2, 1, 220.00, now(), now());
 
-  INSERT INTO public.movimientos (producto_id, sucursal_id, tipo, cantidad, observacion, created_at, updated_at)
-  VALUES
-    (v_p1, 1, 'salida', 1, concat('Venta #', v_venta_id), now(), now()),
-    (v_p2, 1, 'salida', 1, concat('Venta #', v_venta_id), now(), now());
+    INSERT INTO public.movimientos (producto_id, sucursal_id, tipo, cantidad, observacion, created_at, updated_at)
+    VALUES
+      (v_p1, 1, 'salida', 1, concat('Venta #', v_venta_id), now(), now()),
+      (v_p2, 1, 'salida', 1, concat('Venta #', v_venta_id), now(), now());
+  END IF;
 
-  -- Venta 2: Hoy (2026-09-16) - Sucursal 2 (Montenegro) - QR (Total: 225.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (2, v_now - interval '4 hours', 'QR', 225.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 2: Hoy - Sucursal 2 (Montenegro) - QR (Total: 225.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 2
+      AND fecha = v_now - interval '4 hours'
+      AND metodo_pago = 'QR'
+      AND total = 225.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (2, v_now - interval '4 hours', 'QR', 225.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES
-    (v_venta_id, v_p3, 1, 140.00, now(), now()),
-    (v_venta_id, v_p4, 1, 85.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES
+      (v_venta_id, v_p3, 1, 140.00, now(), now()),
+      (v_venta_id, v_p4, 1, 85.00, now(), now());
 
-  INSERT INTO public.movimientos (producto_id, sucursal_id, tipo, cantidad, observacion, created_at, updated_at)
-  VALUES
-    (v_p3, 2, 'salida', 1, concat('Venta #', v_venta_id), now(), now()),
-    (v_p4, 2, 'salida', 1, concat('Venta #', v_venta_id), now(), now());
+    INSERT INTO public.movimientos (producto_id, sucursal_id, tipo, cantidad, observacion, created_at, updated_at)
+    VALUES
+      (v_p3, 2, 'salida', 1, concat('Venta #', v_venta_id), now(), now()),
+      (v_p4, 2, 'salida', 1, concat('Venta #', v_venta_id), now(), now());
+  END IF;
 
-  -- Venta 3: Ayer (2026-09-15) - Sucursal 1 (Comercio) - Tarjeta (Total: 360.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (1, v_now - interval '1 day 3 hours', 'tarjeta', 360.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 3: Ayer - Sucursal 1 (Comercio) - Tarjeta (Total: 360.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 1
+      AND fecha = v_now - interval '1 day 3 hours'
+      AND metodo_pago = 'tarjeta'
+      AND total = 360.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (1, v_now - interval '1 day 3 hours', 'tarjeta', 360.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES (v_venta_id, v_p1, 2, 180.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES (v_venta_id, v_p1, 2, 180.00, now(), now());
+  END IF;
 
-  -- Venta 4: Hace 2 días (2026-09-14) - Sucursal 3 (Ceja) - Efectivo (Total: 170.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (3, v_now - interval '2 days 5 hours', 'efectivo', 170.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 4: Hace 2 días - Sucursal 3 (Ceja) - Efectivo (Total: 170.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 3
+      AND fecha = v_now - interval '2 days 5 hours'
+      AND metodo_pago = 'efectivo'
+      AND total = 170.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (3, v_now - interval '2 days 5 hours', 'efectivo', 170.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES (v_venta_id, v_p4, 2, 85.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES (v_venta_id, v_p4, 2, 85.00, now(), now());
+  END IF;
 
-  -- Venta 5: Hace 3 días (2026-09-13) - Sucursal 2 (Montenegro) - Transferencia (Total: 440.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (2, v_now - interval '3 days 4 hours', 'transferencia', 440.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 5: Hace 3 días - Sucursal 2 (Montenegro) - Transferencia (Total: 440.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 2
+      AND fecha = v_now - interval '3 days 4 hours'
+      AND metodo_pago = 'transferencia'
+      AND total = 440.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (2, v_now - interval '3 days 4 hours', 'transferencia', 440.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES (v_venta_id, v_p2, 2, 220.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES (v_venta_id, v_p2, 2, 220.00, now(), now());
+  END IF;
 
-  -- Venta 6: Hace 4 días (2026-09-12) - Sucursal 1 (Comercio) - QR (Total: 320.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (1, v_now - interval '4 days 2 hours', 'QR', 320.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 6: Hace 4 días - Sucursal 1 (Comercio) - QR (Total: 320.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 1
+      AND fecha = v_now - interval '4 days 2 hours'
+      AND metodo_pago = 'QR'
+      AND total = 320.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (1, v_now - interval '4 days 2 hours', 'QR', 320.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES
-    (v_venta_id, v_p1, 1, 180.00, now(), now()),
-    (v_venta_id, v_p3, 1, 140.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES
+      (v_venta_id, v_p1, 1, 180.00, now(), now()),
+      (v_venta_id, v_p3, 1, 140.00, now(), now());
+  END IF;
 
-  -- Venta 7: Hace 5 días (2026-09-11) - Sucursal 4 (Satélite) - Efectivo (Total: 255.00)
-  INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
-  VALUES (4, v_now - interval '5 days 6 hours', 'efectivo', 255.00, now(), now())
-  RETURNING id INTO v_venta_id;
+  -- Venta 7: Hace 5 días - Sucursal 4 (Satélite) - Efectivo (Total: 255.00)
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ventas
+    WHERE sucursal_id = 4
+      AND fecha = v_now - interval '5 days 6 hours'
+      AND metodo_pago = 'efectivo'
+      AND total = 255.00
+  ) THEN
+    INSERT INTO public.ventas (sucursal_id, fecha, metodo_pago, total, created_at, updated_at)
+    VALUES (4, v_now - interval '5 days 6 hours', 'efectivo', 255.00, now(), now())
+    RETURNING id INTO v_venta_id;
 
-  INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
-  VALUES (v_venta_id, v_p4, 3, 85.00, now(), now());
+    INSERT INTO public.ventas_detalles (venta_id, producto_id, cantidad, precio, created_at, updated_at)
+    VALUES (v_venta_id, v_p4, 3, 85.00, now(), now());
+  END IF;
 
 END $$;
