@@ -3,11 +3,13 @@ import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Button, IconButton, Snackbar, Text } from "react-native-paper";
 import { Menu, Plus, Sparkles } from "lucide-react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
 import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { useAuth } from "../../auth/hooks/useAuth";
-import { can } from "../../auth/lib/permissions";
+import { buildAssistantScopeContext, canExecuteAssistantWrite } from "../lib/assistantAuthorization";
+import { emptyAssistantChat, hydrateAssistantChat, saveAssistantChat } from "../lib/assistantSessionPersistence";
 import { getPreferredMode, setPreferredMode, type PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { colors, spacing } from "../../../shared/theme";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
@@ -60,7 +62,6 @@ export function VoiceCommandView() {
   const stock = useStockMultiSucursal();
   const sale = useProcesarVenta();
   const productMutation = useRegistrarProducto();
-  const canWriteProducts = can(profile?.rol, "products.write");
   const { requestConfirm, dialog: confirmDialog } = useConfirm();
   const [mode, setMode] = useState<PreferredMode>("auto");
   const cargarModo = useCallback(() => {
@@ -91,8 +92,57 @@ export function VoiceCommandView() {
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
   const idRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
-  const activeBranch = branchId ?? branches.data?.[0]?.id ?? null;
-  const branchName = branches.data?.find((branch) => branch.id === activeBranch)?.nombre ?? "";
+  const persistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const persistedUserRef = useRef<string | null>(null);
+  const hydratedUserRef = useRef<string | null>(null);
+  const assistantScope = useMemo(
+    () => buildAssistantScopeContext(profile, branches.data ?? [], branchId),
+    [branchId, branches.data, profile],
+  );
+  const allowedBranches = useMemo(
+    () => (branches.data ?? []).filter((branch) => assistantScope?.allowedBranchIds.includes(branch.id) ?? false),
+    [assistantScope?.allowedBranchIds, branches.data],
+  );
+  const activeBranch = assistantScope?.activeBranchId ?? null;
+  const branchName = assistantScope?.activeBranchName ?? "";
+  const canWriteProducts = canExecuteAssistantWrite(profile, "products.write", activeBranch);
+  const userId = profile?.id ?? null;
+
+  const enqueuePersistence = useCallback((operation: () => Promise<void>) => {
+    const queued = persistenceQueueRef.current.then(operation, operation);
+    persistenceQueueRef.current = queued.catch(() => undefined);
+    return queued;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    persistedUserRef.current = userId;
+    hydratedUserRef.current = null;
+    dispatch({ type: "reemplazar-estado", state: emptyAssistantChat() });
+    setInspectingId(null);
+    setPendingConfirmation(null);
+    setPendingRegistration(null);
+    setShortage(null);
+    setLastLines([]);
+    if (!userId) return () => { cancelled = true; };
+
+    void enqueuePersistence(async () => {
+      const restored = await hydrateAssistantChat(AsyncStorage, userId);
+      if (cancelled || persistedUserRef.current !== userId) return;
+      hydratedUserRef.current = userId;
+      dispatch({ type: "reemplazar-estado", state: restored });
+    });
+    return () => { cancelled = true; };
+  }, [enqueuePersistence, userId]);
+
+  useEffect(() => {
+    if (!userId || hydratedUserRef.current !== userId) return;
+    const snapshot = chat;
+    void enqueuePersistence(async () => {
+      if (persistedUserRef.current !== userId || hydratedUserRef.current !== userId) return;
+      await saveAssistantChat(AsyncStorage, userId, snapshot);
+    });
+  }, [chat, enqueuePersistence, userId]);
 
   const nextId = (prefix: string) => {
     idRef.current += 1;
@@ -261,7 +311,7 @@ export function VoiceCommandView() {
       return;
     }
     try {
-      const consulta = await consultarStockDe(producto, intento.sucursal);
+      const consulta = await consultarStockDe(producto, intento.sucursal, undefined, assistantScope?.allowedBranchIds);
       agregar(sessionId, {
         role: "asistente",
         tone: "success",
@@ -307,13 +357,14 @@ export function VoiceCommandView() {
         role: m.role,
         texto: m.texto,
       }));
-      const sucursalesDisponibles = (branches.data ?? []).map((b) => b.nombre);
+      const sucursalesDisponibles = assistantScope?.allowedBranchNames ?? [];
       const ultimoProducto = lastLines[0]?.producto?.nombre;
 
       const contexto: VozContexto = {
         ultimoProductoNombre: ultimoProducto,
         historial,
         sucursales: sucursalesDisponibles,
+        authorization: assistantScope ?? undefined,
       };
 
       const result: ResultadoInterpretacion = await voice.interpret(contexto);
@@ -340,6 +391,10 @@ export function VoiceCommandView() {
         return;
       }
       if (result.tipo === "registro_producto") {
+        if (activeBranch === null) {
+          agregar(sessionId, { role: "asistente", tone: "error", texto: "No tenés una sucursal habilitada para registrar productos." });
+          return;
+        }
         fijarObjetivo(sessionId, "registro");
         setPendingRegistration(result.datos);
         agregar(sessionId, {
@@ -351,11 +406,37 @@ export function VoiceCommandView() {
           attachment: {
             kind: "registro-producto",
             datos: result.datos,
-            branchId: activeBranch ?? 1,
+            branchId: activeBranch,
             branchName,
           },
         });
         voice.setTranscript("");
+        return;
+      }
+      if (result.tipo === "buscar_producto") {
+        fijarObjetivo(sessionId, "consulta");
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "success",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: { kind: "busqueda-productos", consulta: result.consulta, productos: result.productos },
+        });
+        dispatch({ type: "fijar-resumen", sessionId, resumen: `Búsqueda: ${result.consulta}`.slice(0, 80), updatedAt: ahora() });
+        return;
+      }
+      if (result.tipo === "consulta_bajo_stock") {
+        fijarObjetivo(sessionId, "consulta");
+        agregar(sessionId, {
+          role: "asistente",
+          tone: result.productos.length > 0 ? "warning" : "success",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: { kind: "stock-bajo", productos: result.productos },
+        });
+        dispatch({ type: "fijar-resumen", sessionId, resumen: `Stock bajo: ${result.productos.length} producto(s)`, updatedAt: ahora() });
         return;
       }
       if (result.tipo === "consulta_stock" || result.tipo === "consulta_ventas") {
@@ -423,6 +504,10 @@ export function VoiceCommandView() {
   const confirmarVenta = () => {
     const sessionId = chat.activeSessionId;
     if (!pendingConfirmation || !sessionId || activeBranch === null || sale.isPending) return;
+    if (!canExecuteAssistantWrite(profile, "sales.write", activeBranch)) {
+      agregar(sessionId, { role: "asistente", tone: "error", texto: "Tu permiso o sucursal actual ya no permiten registrar esta venta." });
+      return;
+    }
     sale.mutate(
       {
         sucursal_id: activeBranch,
@@ -460,6 +545,10 @@ export function VoiceCommandView() {
   const cargarAlCarrito = () => {
     const sessionId = chat.activeSessionId;
     if (!pendingConfirmation || !sessionId) return;
+    if (!canExecuteAssistantWrite(profile, "sales.write", activeBranch)) {
+      agregar(sessionId, { role: "asistente", tone: "error", texto: "Tu permiso o sucursal actual ya no permiten preparar esta venta." });
+      return;
+    }
     establecerLotePendiente(
       pendingConfirmation.map((line) => ({
         producto: {
@@ -505,6 +594,10 @@ export function VoiceCommandView() {
   }) => {
     const sessionId = chat.activeSessionId;
     if (!sessionId || productMutation.isPending) return;
+    if (!canExecuteAssistantWrite(profile, "products.write", input.sucursal_id)) {
+      agregar(sessionId, { role: "asistente", tone: "error", texto: "Tu permiso o sucursal actual ya no permiten registrar este producto." });
+      return;
+    }
     productMutation.mutate(
       {
         nombre: input.nombre,
@@ -618,10 +711,23 @@ export function VoiceCommandView() {
     void enviar();
   };
 
-  if (voice.permissionLoading || branches.isLoading || stock.isLoading) {
+  if (voice.permissionLoading || branches.isLoading || stock.isLoading || (userId !== null && hydratedUserRef.current !== userId)) {
     return (
       <ScreenContainer>
         <ActivityIndicator color={colors.primary} />
+      </ScreenContainer>
+    );
+  }
+
+  if (!assistantScope || activeBranch === null) {
+    return (
+      <ScreenContainer>
+        <View style={styles.noScope}>
+          <Text variant="titleMedium" style={styles.noScopeTitle}>Sin sucursal habilitada</Text>
+          <Text variant="bodyMedium" style={styles.noScopeText}>
+            Tu perfil actual no tiene una sucursal autorizada para usar el asistente. Volvé a iniciar sesión o contactá a administración.
+          </Text>
+        </View>
       </ScreenContainer>
     );
   }
@@ -653,9 +759,9 @@ export function VoiceCommandView() {
         </Text>
         <BranchSelect
           label="Sucursal"
-          branches={branches.data ?? []}
+          branches={allowedBranches}
           value={activeBranch}
-          onChange={(id) => { if (id !== undefined) setBranchId(id); }}
+          onChange={(id) => { if (id !== undefined && assistantScope.allowedBranchIds.includes(id)) setBranchId(id); }}
         />
         <SessionBar active={activeSession} />
         {inspectingId && visibleSession ? (
@@ -792,6 +898,32 @@ export function VoiceCommandView() {
                       {"  "}· {message.attachment.cantidadVentas} venta(s) hoy
                     </Text>
                   </Text>
+                ) : null}
+                {message.attachment?.kind === "busqueda-productos" ? (
+                  <View style={styles.queryCard}>
+                    {message.attachment.productos.slice(0, 6).map((producto) => (
+                      <View key={producto.id} style={styles.queryRow}>
+                        <View style={styles.queryCopy}>
+                          <Text variant="bodySmall" style={styles.queryBranch}>{producto.nombre}</Text>
+                          <Text variant="labelSmall" style={styles.queryMeta}>{producto.codigo} · {producto.categoria}</Text>
+                        </View>
+                        <Text variant="labelMedium" style={styles.queryQty}>Bs {producto.precio.toFixed(2)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {message.attachment?.kind === "stock-bajo" ? (
+                  <View style={styles.queryCard}>
+                    {message.attachment.productos.slice(0, 6).map((item) => (
+                      <View key={item.id} style={styles.queryRow}>
+                        <View style={styles.queryCopy}>
+                          <Text variant="bodySmall" style={styles.queryBranch}>{item.producto.nombre}</Text>
+                          <Text variant="labelSmall" style={styles.queryMeta}>{item.sucursal.nombre} · mínimo {item.threshold}</Text>
+                        </View>
+                        <Text variant="labelMedium" style={styles.lowStockQty}>{item.cantidad} uds</Text>
+                      </View>
+                    ))}
+                  </View>
                 ) : null}
               </ChatMessageBubble>
               );
@@ -947,7 +1079,13 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   queryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  queryCopy: { flex: 1, gap: 1, paddingRight: spacing.xs },
   queryBranch: { color: colors.textSecondary },
+  queryMeta: { color: colors.textMuted },
   queryQty: { color: colors.textPrimary, fontWeight: "700" },
+  lowStockQty: { color: colors.warning, fontWeight: "700" },
   queryTotal: { color: colors.successDark, fontWeight: "800" },
+  noScope: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.lg },
+  noScopeTitle: { color: colors.textPrimary, fontWeight: "800", textAlign: "center" },
+  noScopeText: { color: colors.textSecondary, textAlign: "center", lineHeight: 21 },
 });

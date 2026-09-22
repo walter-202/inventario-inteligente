@@ -3,12 +3,42 @@ import { supabase } from "../../../shared/lib/supabase";
 import { fetchAllPages } from "../../../shared/lib/pagination";
 import { obtenerInventario, obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
 import type { DashboardLowStockItem, DashboardMetrics } from "../../../shared/types/domain";
-import { bucketSalesByLocalDay, getDashboardCalendar } from "../lib/dateBuckets";
+import { bucketSalesByLocalDay, getDashboardCalendar, getTodayCalendar } from "../lib/dateBuckets";
 
 /** Operational definition used by the dashboard; it never invents stock values. */
 export const LOW_STOCK_THRESHOLD = 5;
 
 const salesRowSchema = z.object({ id: z.number(), total: z.number(), fecha: z.string(), sucursal_id: z.number() });
+
+/** Read-only sales aggregate for assistant requests limited to the local calendar day. */
+export async function obtenerVentasDeHoy(
+  sucursalId?: number,
+  now = new Date(),
+): Promise<Pick<DashboardMetrics, "totalSales" | "salesCount">> {
+  const { startInclusive, endExclusive } = getTodayCalendar(now);
+  const validatedSucursalId = sucursalId === undefined
+    ? undefined
+    : z.number().int().positive().parse(sucursalId);
+  const rows = await fetchAllPages(async (from, to) => {
+    let salesQuery = supabase
+      .from("ventas")
+      .select("id, total, fecha, sucursal_id")
+      .gte("fecha", startInclusive.toISOString())
+      .lt("fecha", endExclusive.toISOString())
+      .order("fecha", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (validatedSucursalId !== undefined) salesQuery = salesQuery.eq("sucursal_id", validatedSucursalId);
+    const { data, error } = await salesQuery;
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+  const sales = rows.map((row) => salesRowSchema.parse(row));
+  return {
+    totalSales: sales.reduce((sum, sale) => sum + Number(sale.total), 0),
+    salesCount: sales.length,
+  };
+}
 
 export async function obtenerDashboardMetrics(sucursalId?: number, now = new Date()): Promise<DashboardMetrics> {
   const calendar = getDashboardCalendar(now);

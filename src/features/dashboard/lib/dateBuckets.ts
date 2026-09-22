@@ -6,6 +6,13 @@ export function startOfLocalDay(date: Date): Date {
   return result;
 }
 
+export function getTodayCalendar(now: Date): { startInclusive: Date; endExclusive: Date } {
+  const startInclusive = startOfLocalDay(now);
+  const endExclusive = new Date(startInclusive);
+  endExclusive.setDate(endExclusive.getDate() + 1);
+  return { startInclusive, endExclusive };
+}
+
 export function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

@@ -1,4 +1,4 @@
-import type { Producto } from "../../../shared/types/domain";
+import type { DashboardLowStockItem, Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 
 /**
@@ -31,7 +31,9 @@ export type ChatAttachment =
   | { kind: "confirmacion-venta" }
   | { kind: "registro-producto"; datos: RegistroProductoParsed; branchId: number; branchName: string }
   | { kind: "consulta-stock"; productoNombre: string; filas: StockRow[]; total: number }
-  | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number };
+  | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number }
+  | { kind: "busqueda-productos"; consulta: string; productos: Producto[] }
+  | { kind: "stock-bajo"; productos: DashboardLowStockItem[] };
 
 export interface ChatMessage {
   id: string;
@@ -62,6 +64,10 @@ export interface ChatState {
   messages: Record<string, ChatMessage[]>;
 }
 
+/** In-memory limits mirror persisted history limits to keep a long-lived chat finite. */
+export const MAX_CHAT_SESSIONS = 20;
+export const MAX_CHAT_MESSAGES = 30;
+
 export type ChatAction =
   | { type: "nueva-sesion"; session: ChatSession }
   | { type: "fijar-objetivo"; sessionId: string; objetivo: ObjetivoSesion; updatedAt: number }
@@ -71,9 +77,22 @@ export type ChatAction =
   | { type: "cancelar-sesion"; sessionId: string; updatedAt: number }
   | { type: "reanudar-sesion"; sessionId: string; updatedAt: number }
   | { type: "eliminar-sesion"; sessionId: string }
-  | { type: "restaurar-sesion"; session: ChatSession; messages: ChatMessage[] };
+  | { type: "restaurar-sesion"; session: ChatSession; messages: ChatMessage[] }
+  | { type: "reemplazar-estado"; state: ChatState };
 
 export const chatInicial: ChatState = { sessions: [], activeSessionId: null, messages: {} };
+
+function limitarSesiones(sessions: ChatSession[], messages: Record<string, ChatMessage[]>): Pick<ChatState, "sessions" | "messages"> {
+  if (sessions.length <= MAX_CHAT_SESSIONS) return { sessions, messages };
+  const idsConservados = new Set(
+    [...sessions]
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, MAX_CHAT_SESSIONS)
+      .map((session) => session.id),
+  );
+  const mensajesConservados = Object.fromEntries(Object.entries(messages).filter(([sessionId]) => idsConservados.has(sessionId)));
+  return { sessions: sessions.filter((session) => idsConservados.has(session.id)), messages: mensajesConservados };
+}
 
 function cerrarActiva(state: ChatState, updatedAt: number): ChatSession[] {
   return state.sessions.map((session) =>
@@ -87,10 +106,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "nueva-sesion": {
       if (state.sessions.some((session) => session.id === action.session.id)) return state;
+      const bounded = limitarSesiones(
+        [...cerrarActiva(state, action.session.createdAt), { ...action.session, estado: "activa" as EstadoSesion }],
+        { ...state.messages, [action.session.id]: [] },
+      );
       return {
-        sessions: [...cerrarActiva(state, action.session.createdAt), { ...action.session, estado: "activa" as EstadoSesion }],
+        sessions: bounded.sessions,
         activeSessionId: action.session.id,
-        messages: { ...state.messages, [action.session.id]: [] },
+        messages: bounded.messages,
       };
     }
     case "fijar-objetivo": {
@@ -123,7 +146,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ),
         messages: {
           ...state.messages,
-          [action.sessionId]: [...(state.messages[action.sessionId] ?? []), action.message],
+          [action.sessionId]: [...(state.messages[action.sessionId] ?? []), action.message].slice(-MAX_CHAT_MESSAGES),
         },
       };
     }
@@ -178,13 +201,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
     case "restaurar-sesion": {
       if (state.sessions.some((item) => item.id === action.session.id)) return state;
+      const bounded = limitarSesiones(
+        [...state.sessions, action.session],
+        { ...state.messages, [action.session.id]: action.messages.slice(-MAX_CHAT_MESSAGES) },
+      );
       const eraActiva = action.session.estado === "activa";
       return {
-        sessions: [...state.sessions, action.session],
-        activeSessionId: eraActiva && state.activeSessionId === null ? action.session.id : state.activeSessionId,
-        messages: { ...state.messages, [action.session.id]: action.messages },
+        sessions: bounded.sessions,
+        activeSessionId: eraActiva && state.activeSessionId === null && bounded.sessions.some((session) => session.id === action.session.id) ? action.session.id : state.activeSessionId,
+        messages: bounded.messages,
       };
     }
+    case "reemplazar-estado":
+      return action.state;
   }
 }
 

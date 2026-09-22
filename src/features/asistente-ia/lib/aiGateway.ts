@@ -31,15 +31,21 @@ export interface AICompletionResult<T> {
   error?: string;
 }
 
-function cleanAndParseJSON(rawText: string): unknown {
+/**
+ * Parses provider JSON defensively. Invalid or non-object payloads are rejected so
+ * callers can fall back without treating model text as a command.
+ */
+export function parseAIJSON(rawText: string): unknown | null {
   let cleaned = rawText.trim();
-  // Strip markdown code fences if model enclosed JSON in them
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/\s*```$/, "");
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+  if (cleaned.startsWith("```json") || cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   }
-  return JSON.parse(cleaned);
+  try {
+    const parsed: unknown = JSON.parse(cleaned);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 async function callOpenAICompatible(
@@ -223,8 +229,8 @@ export async function testProviderConnection(
       rawContent = await callGemini(provider, apiKey, modelToUse, systemPrompt, userMessage, undefined, 8000);
     }
 
-    const parsedJson = cleanAndParseJSON(rawContent);
-    const validated = testSchema.safeParse(parsedJson);
+    const parsedJson = parseAIJSON(rawContent);
+    const validated = parsedJson === null ? { success: false } : testSchema.safeParse(parsedJson);
     if (!validated.success) {
       return { ok: false, error: "La respuesta del modelo no siguió el formato esperado.", modelUsed: modelToUse };
     }
@@ -299,7 +305,11 @@ export async function completeChatJSON<T>(
         );
       }
 
-      const parsedJson = cleanAndParseJSON(rawContent);
+      const parsedJson = parseAIJSON(rawContent);
+      if (parsedJson === null) {
+        console.warn(`[AIGateway] Invalid JSON returned by ${provider.name} with model ${modelToUse}`);
+        continue;
+      }
       const validated = schema.safeParse(parsedJson);
 
       if (validated.success) {

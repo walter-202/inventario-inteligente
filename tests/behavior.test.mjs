@@ -893,3 +893,192 @@ test("V2 RF-28: generarInsightsMarketing identifies top star, dead stock, and ca
 
 
 
+
+test("assistant parser only accepts named product queries and allowlisted read intents", () => {
+  const { interpretarHeuristica, VoiceInterpretationSchema } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+
+  const broadStockQuestion = interpretarHeuristica("¿Qué productos tienen stock disponible?");
+  assert.equal(broadStockQuestion.accion, "desconocida");
+  assert.deepEqual(broadStockQuestion.productos, []);
+
+  const productSearch = interpretarHeuristica("Buscá producto Jean Mom Fit");
+  assert.equal(productSearch.accion, "buscar_producto");
+  assert.equal(productSearch.consulta?.producto, "jean mom fit");
+
+  const lowStock = interpretarHeuristica("Mostrame el inventario con bajo stock en Central");
+  assert.equal(lowStock.accion, "consulta_bajo_stock");
+  assert.equal(lowStock.consulta?.sucursal, "central");
+
+  assert.equal(VoiceInterpretationSchema.safeParse({ accion: "eliminar_productos", productos: [] }).success, false);
+});
+
+test("AI gateway rejects malformed model JSON instead of throwing or accepting it", () => {
+  const { parseAIJSON } = loadTsModule("src/features/asistente-ia/lib/aiGateway.ts");
+
+  assert.equal(parseAIJSON("this is not JSON"), null);
+  assert.deepEqual(parseAIJSON("```json\n{\"accion\":\"consulta_stock\"}\n```"), { accion: "consulta_stock" });
+});
+
+test("voice product search dispatches only the extracted product name to the read API", async () => {
+  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const receivedQueries = [];
+  const product = { id: 9, nombre: "Jean Mom Fit", codigo: "JEA-001", categoria: "Pantalones", precio: 185, cantidad: 10 };
+  const readApi = {
+    findProductByCode: async () => product,
+    searchProducts: async (query) => {
+      receivedQueries.push(query);
+      return [product];
+    },
+    stockForProduct: async () => [],
+    getBranches: async () => [],
+    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
+    getLowStock: async () => [],
+  };
+
+  const result = await interpretarVoz("Buscá producto Jean Mom Fit", undefined, readApi);
+
+  assert.equal(result.tipo, "buscar_producto");
+  assert.deepEqual(receivedQueries, ["jean mom fit"]);
+});
+
+test("voice read dispatch filters low stock and today's sales by an exact branch", async () => {
+  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const calls = { lowStock: [], todaySales: [] };
+  const readApi = {
+    findProductByCode: async () => { throw new Error("not used"); },
+    searchProducts: async () => [],
+    stockForProduct: async () => [],
+    getBranches: async () => [{ id: 4, nombre: "Central" }],
+    getTodaySales: async (branchId) => {
+      calls.todaySales.push(branchId);
+      return { totalSales: 320, salesCount: 2 };
+    },
+    getLowStock: async (branchId) => {
+      calls.lowStock.push(branchId);
+      return [];
+    },
+  };
+
+  const lowStock = await interpretarVoz("Mostrame el inventario con bajo stock en Central", undefined, readApi);
+  assert.equal(lowStock.tipo, "consulta_bajo_stock");
+  assert.deepEqual(calls.lowStock, [4]);
+
+  const todaySales = await interpretarVoz("Resumen de ventas de hoy en Central", undefined, readApi);
+  assert.equal(todaySales.tipo, "consulta_ventas");
+  assert.equal(todaySales.periodo, "hoy");
+  assert.deepEqual(calls.todaySales, [4]);
+});
+
+test("voice read dispatch rejects an unknown explicit branch before an unfiltered sales query", async () => {
+  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  let todaySalesCalls = 0;
+  const readApi = {
+    findProductByCode: async () => { throw new Error("not used"); },
+    searchProducts: async () => [],
+    stockForProduct: async () => [],
+    getBranches: async () => [{ id: 4, nombre: "Central" }],
+    getTodaySales: async () => {
+      todaySalesCalls += 1;
+      return { totalSales: 0, salesCount: 0 };
+    },
+    getLowStock: async () => [],
+  };
+
+  const result = await interpretarVoz("Resumen de ventas de hoy en Fantasma", undefined, readApi);
+
+  assert.equal(result.tipo, "aclaracion");
+  assert.equal(todaySalesCalls, 0);
+  assert.match(result.mensaje, /Fantasma/i);
+});
+
+test("today sales calendar uses local midnight boundaries rather than the dashboard's seven-day window", () => {
+  const { getTodayCalendar } = loadTsModule("src/features/dashboard/lib/dateBuckets.ts");
+  const { startInclusive, endExclusive } = getTodayCalendar(new Date("2026-09-16T22:00:00-04:00"));
+
+  assert.equal(startInclusive.toISOString(), "2026-09-16T04:00:00.000Z");
+  assert.equal(endExclusive.toISOString(), "2026-09-17T04:00:00.000Z");
+});
+
+test("assistant chat persistence is user-scoped, bounded, and hydrates only display-safe messages", async () => {
+  const { hydrateAssistantChat, saveAssistantChat, assistantChatStorageKey, MAX_STORED_SESSIONS, MAX_STORED_MESSAGES } = loadTsModule("src/features/asistente-ia/lib/assistantSessionPersistence.ts");
+  const values = new Map();
+  const storage = {
+    getItem: async (key) => values.get(key) ?? null,
+    setItem: async (key, value) => { values.set(key, value); },
+    removeItem: async (key) => { values.delete(key); },
+  };
+  const sessions = Array.from({ length: MAX_STORED_SESSIONS + 2 }, (_, index) => ({
+    id: `session-${index}`,
+    objetivo: "consulta",
+    estado: "completada",
+    resumen: `Consulta ${index}`,
+    createdAt: index,
+    updatedAt: index,
+  }));
+  const state = {
+    sessions,
+    activeSessionId: "session-21",
+    messages: {
+      "session-21": Array.from({ length: MAX_STORED_MESSAGES + 2 }, (_, index) => ({
+        id: `message-${index}`,
+        role: "asistente",
+        texto: `Respuesta ${index}`,
+        attachment: { kind: "confirmacion-venta" },
+      })),
+    },
+  };
+
+  await saveAssistantChat(storage, "user-a", state);
+  assert.notEqual(values.get(assistantChatStorageKey("user-a")), undefined);
+  assert.equal(values.get(assistantChatStorageKey("user-b")), undefined);
+
+  const hydrated = await hydrateAssistantChat(storage, "user-a");
+  assert.equal(hydrated.sessions.length, MAX_STORED_SESSIONS);
+  assert.equal(hydrated.messages["session-21"].length, MAX_STORED_MESSAGES);
+  assert.equal(hydrated.messages["session-21"][0].attachment, undefined);
+
+  values.set(assistantChatStorageKey("user-a"), "{not-json");
+  assert.deepEqual(await hydrateAssistantChat(storage, "user-a"), { sessions: [], activeSessionId: null, messages: {} });
+});
+
+test("assistant scope selects only authorized branches and rechecks writes", () => {
+  const { buildAssistantScopeContext, resolveAssistantBranch, canExecuteAssistantWrite } = loadTsModule("src/features/asistente-ia/lib/assistantAuthorization.ts");
+  const profile = { id: "user-a", email: "a@example.com", nombre: "Ana", rol: "cajera", sucursal_id: 2, created_at: "", updated_at: "" };
+  const branches = [{ id: 1, nombre: "Central" }, { id: 2, nombre: "Comercio" }];
+
+  assert.equal(resolveAssistantBranch(profile, branches, 1), 2);
+  assert.equal(resolveAssistantBranch(profile, branches, null), 2);
+  assert.equal(canExecuteAssistantWrite(profile, "sales.write", 1), false);
+  assert.equal(canExecuteAssistantWrite(profile, "sales.write", 2), true);
+
+  const scope = buildAssistantScopeContext(profile, branches, 1);
+  assert.deepEqual(scope.allowedBranchIds, [2]);
+  assert.equal(scope.activeBranchId, 2);
+  assert.ok(scope.abilities.includes("sales.write"));
+});
+
+
+test("assistant read intents default to the current authorized branch and reject excluded branches", async () => {
+  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const calls = [];
+  const readApi = {
+    findProductByCode: async () => { throw new Error("not used"); },
+    searchProducts: async () => [],
+    stockForProduct: async () => [],
+    getBranches: async () => [{ id: 1, nombre: "Central" }, { id: 2, nombre: "Comercio" }],
+    getTodaySales: async (branchId) => { calls.push(branchId); return { totalSales: 15, salesCount: 1 }; },
+    getLowStock: async () => [],
+  };
+  const authorization = {
+    userId: "user-a", role: "cajera", abilities: ["ai.read", "sales.read"],
+    activeBranchId: 2, activeBranchName: "Comercio", allowedBranchIds: [2], allowedBranchNames: ["Comercio"],
+  };
+
+  const defaultResult = await interpretarVoz("Ventas de hoy", { sucursales: ["Comercio"], authorization }, readApi);
+  assert.equal(defaultResult.tipo, "consulta_ventas");
+  assert.deepEqual(calls, [2]);
+
+  const excludedResult = await interpretarVoz("Ventas de hoy en Central", { sucursales: ["Comercio"], authorization }, readApi);
+  assert.equal(excludedResult.tipo, "aclaracion");
+  assert.deepEqual(calls, [2]);
+});
