@@ -71,11 +71,11 @@ BEGIN
   -- 7. Insert identity for email provider
   INSERT INTO auth.identities (
     id, user_id, identity_data, provider, provider_id,
-    last_sign_in_at, created_at, updated_at, email
+    last_sign_in_at, created_at, updated_at
   ) VALUES (
     gen_random_uuid(), v_uid,
     jsonb_build_object('sub', v_uid::text, 'email', v_email_clean, 'email_verified', true, 'phone_verified', false),
-    'email', v_uid::text, timezone('utc'::text, now()), timezone('utc'::text, now()), timezone('utc'::text, now()), v_email_clean
+    'email', v_uid::text, timezone('utc'::text, now()), timezone('utc'::text, now()), timezone('utc'::text, now())
   );
 
   -- 8. Insert or update public.perfiles

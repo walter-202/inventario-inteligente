@@ -7,10 +7,12 @@ import {
   Card,
   Chip,
   Dialog,
+  Divider,
   Portal,
   RadioButton,
   Snackbar,
   Text,
+  TextInput,
 } from "react-native-paper";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
@@ -21,6 +23,7 @@ import { can, roleLabels } from "../lib/permissions";
 import type { Role } from "../lib/authTypes";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import {
+  createCollaboratorUser,
   fetchUserProfiles,
   updateUserProfile,
   type UserProfileItem,
@@ -49,6 +52,16 @@ export function GestionUsuariosScreen() {
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [snackMsg, setSnackMsg] = useState<string | null>(null);
+
+  // Create collaborator dialog state
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [newNombre, setNewNombre] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<Role>("vendedora");
+  const [newBranchId, setNewBranchId] = useState<number | null>(1);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -101,6 +114,59 @@ export function GestionUsuariosScreen() {
     }
   };
 
+  const openCreate = () => {
+    setNewNombre("");
+    setNewEmail("");
+    setNewPassword("");
+    setNewRole("vendedora");
+    setNewBranchId(sucursalesQuery.data?.[0]?.id ?? 1);
+    setCreateError(null);
+    setIsCreatingUser(true);
+  };
+
+  const closeCreate = () => {
+    if (creating) return;
+    setIsCreatingUser(false);
+  };
+
+  const handleCreate = async () => {
+    const cleanNombre = newNombre.trim();
+    const cleanEmail = newEmail.trim().toLowerCase();
+
+    if (!cleanNombre) {
+      setCreateError("Ingresá el nombre completo del colaborador.");
+      return;
+    }
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setCreateError("Ingresá un correo electrónico válido.");
+      return;
+    }
+    if (newPassword && newPassword.length < 6) {
+      setCreateError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    try {
+      setCreating(true);
+      setCreateError(null);
+      await createCollaboratorUser({
+        nombre: cleanNombre,
+        email: cleanEmail,
+        password: newPassword || "Lidemoda2026!",
+        rol: newRole,
+        sucursalId: newRole === "admin" ? null : newBranchId,
+      });
+
+      setSnackMsg(`Colaborador ${cleanNombre} registrado con éxito.`);
+      closeCreate();
+      void loadData();
+    } catch (err: any) {
+      setCreateError(err.message || "Error al crear el colaborador.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const getRoleColor = (rol: Role) => {
     switch (rol) {
       case "admin":
@@ -133,6 +199,26 @@ export function GestionUsuariosScreen() {
           <Text variant="bodyMedium" style={styles.introText}>
             Como Administrador General, tu rol es analítico y de supervisión. Podés consultar métricas globales de toda la cadena y gobernar los accesos asignando el rol y la sucursal de trabajo de cada colaboradora.
           </Text>
+        </View>
+
+        <View style={styles.actionHeader}>
+          <View style={{ flex: 1 }}>
+            <Text variant="titleMedium" style={styles.actionHeaderTitle}>
+              Equipo ({users.length})
+            </Text>
+            <Text variant="bodySmall" style={styles.muted}>
+              Colaboradores y permisos
+            </Text>
+          </View>
+          <Button
+            mode="contained"
+            icon="account-plus"
+            onPress={openCreate}
+            style={styles.createButton}
+            labelStyle={{ fontWeight: "700" }}
+          >
+            Nuevo Colaborador
+          </Button>
         </View>
 
         {loading ? (
@@ -197,6 +283,109 @@ export function GestionUsuariosScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Dialog for creating a new collaborator */}
+      <Portal>
+        <Dialog visible={isCreatingUser} onDismiss={closeCreate}>
+          <Dialog.Title>Registrar Nuevo Colaborador</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 440 }}>
+            <ScrollView contentContainerStyle={{ paddingVertical: spacing.sm }}>
+              {createError ? (
+                <Text style={styles.errorText}>{createError}</Text>
+              ) : null}
+
+              <TextInput
+                label="Nombre Completo *"
+                placeholder="Ej: Mariana López"
+                value={newNombre}
+                onChangeText={setNewNombre}
+                mode="outlined"
+                dense
+                style={styles.dialogInput}
+              />
+
+              <TextInput
+                label="Correo Electrónico *"
+                placeholder="colaborador@lidemoda.com"
+                value={newEmail}
+                onChangeText={setNewEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                mode="outlined"
+                dense
+                style={styles.dialogInput}
+              />
+
+              <TextInput
+                label="Contraseña"
+                placeholder="Por defecto: Lidemoda2026!"
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                mode="outlined"
+                dense
+                style={styles.dialogInput}
+              />
+              <Text variant="bodySmall" style={[styles.muted, { marginBottom: spacing.sm }]}>
+                Si lo dejás vacío, se asignará "Lidemoda2026!".
+              </Text>
+
+              <Divider style={{ marginVertical: spacing.xs }} />
+
+              <Text variant="titleSmall" style={styles.sectionTitle}>
+                Rol Operativo:
+              </Text>
+              <RadioButton.Group
+                onValueChange={(val) => setNewRole(val as Role)}
+                value={newRole}
+              >
+                {ROLES_ORDER.map((r) => (
+                  <View key={r} style={styles.radioRow}>
+                    <RadioButton.Item
+                      label={`${roleLabels[r]} ${r === "admin" ? "(Analítico Global)" : ""}`}
+                      value={r}
+                      mode="android"
+                      style={{ paddingVertical: 2 }}
+                    />
+                  </View>
+                ))}
+              </RadioButton.Group>
+
+              {newRole !== "admin" && (
+                <>
+                  <Divider style={{ marginVertical: spacing.xs }} />
+                  <Text variant="titleSmall" style={[styles.sectionTitle, { marginTop: spacing.xs }]}>
+                    Sucursal Asignada:
+                  </Text>
+                  <RadioButton.Group
+                    onValueChange={(val) => setNewBranchId(Number(val))}
+                    value={newBranchId ? String(newBranchId) : ""}
+                  >
+                    {sucursalesQuery.data?.map((suc) => (
+                      <View key={suc.id} style={styles.radioRow}>
+                        <RadioButton.Item
+                          label={`${suc.nombre} (${suc.ciudad})`}
+                          value={String(suc.id)}
+                          mode="android"
+                          style={{ paddingVertical: 2 }}
+                        />
+                      </View>
+                    ))}
+                  </RadioButton.Group>
+                </>
+              )}
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={closeCreate} disabled={creating}>
+              Cancelar
+            </Button>
+            <Button mode="contained" onPress={() => void handleCreate()} loading={creating}>
+              Registrar
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
 
       {/* Dialog for modifying user role and branch */}
       <Portal>
@@ -338,6 +527,22 @@ const styles = StyleSheet.create({
   },
   branchLabel: {
     color: colors.textSecondary,
+  },
+  actionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  actionHeaderTitle: {
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  createButton: {
+    borderRadius: 8,
+  },
+  dialogInput: {
+    marginBottom: spacing.xs,
   },
   sectionTitle: {
     marginTop: spacing.sm,
