@@ -59,7 +59,8 @@ async function callOpenAICompatible(
   imageBase64?: string,
 ): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutError = new Error(`Timeout after ${Math.round(timeoutMs / 1000)}s al contactar al proveedor de IA`);
+  const timer = setTimeout(() => controller.abort(timeoutError), timeoutMs);
 
   try {
     const headers: Record<string, string> = {
@@ -122,6 +123,11 @@ async function callOpenAICompatible(
     }
 
     return content;
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw timeoutError;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -138,7 +144,8 @@ async function callGemini(
   imageBase64?: string,
 ): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutError = new Error(`Timeout after ${Math.round(timeoutMs / 1000)}s al contactar a Gemini`);
+  const timer = setTimeout(() => controller.abort(timeoutError), timeoutMs);
 
   try {
     const url = `${provider.baseUrl}/models/${model}:generateContent?key=${apiKey}`;
@@ -201,6 +208,11 @@ async function callGemini(
     }
 
     return content;
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw timeoutError;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
