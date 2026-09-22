@@ -13,7 +13,7 @@ import { DashboardHero } from "../components/DashboardHero";
 import { SalesWeeklyChart } from "../components/SalesWeeklyChart";
 import { LowStockList } from "../components/LowStockList";
 import { useAuth } from "../../../features/auth/hooks/useAuth";
-import { can } from "../../../features/auth/lib/permissions";
+import { can, isGlobalRole } from "../../../features/auth/lib/permissions";
 import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 
 export function DashboardScreen() {
@@ -33,8 +33,115 @@ export function DashboardScreen() {
   const canCreateProduct = can(profile?.rol, "products.write");
   const canSell = can(profile?.rol, "sales.write");
   const canManageUsers = can(profile?.rol, "users.manage");
-  const subtitle = profile?.rol === "admin" ? "Panel Analítico & Gobierno" : "Panel operativo";
-  return <ScreenContainer><ScrollView contentContainerStyle={styles.content}><AppHeader title="Lidemoda" subtitle={subtitle} branchName={branchName} /><View style={styles.branchSelect}><BranchSelect label="Sucursal" branches={branches.data ?? []} value={branchId} onChange={selectDashboardBranch} allowAll allLabel="Todas las sucursales" disabled={!canChangeBranch} /></View><View style={styles.actions}>{canManageUsers ? <Link href={"/usuarios" as any} asChild><Button mode="contained" compact>Colaboradores</Button></Link> : null}{canCreateProduct ? <Link href="/registrar-producto" asChild><Button mode="contained" compact>+ Producto</Button></Link> : null}{canSell ? <Link href="/nueva-venta" asChild><Button mode="contained-tonal" compact>Nueva venta</Button></Link> : null}<Link href="/escanear" asChild><Button mode="outlined" compact>Escanear</Button></Link><Link href={"/rotacion" as any} asChild><Button mode="outlined" compact>Rotación & IA</Button></Link></View>{metrics.isLoading ? <View style={styles.center}><ActivityIndicator /><Text style={styles.muted}>Cargando métricas reales...</Text></View> : metrics.isError ? <View style={styles.center}><Text style={styles.error}>No se pudieron cargar las métricas.</Text><Button onPress={() => metrics.refetch()}>Reintentar</Button></View> : metrics.data ? <>{<DashboardHero totalHoy={metrics.data.weeklySales.at(-1)?.total ?? 0} total7d={metrics.data.totalSales} operaciones={metrics.data.salesCount} sucursal={branchId === undefined ? null : branchName} />}<KpiGrid metrics={metrics.data} /><SalesWeeklyChart days={metrics.data.weeklySales} /><LowStockList items={metrics.data.lowStock} /></> : <Text style={styles.muted}>No hay datos disponibles.</Text>}</ScrollView></ScreenContainer>;
+  const subtitle = isGlobalRole(profile?.rol) ? "Panel Analítico & Gobierno" : "Panel operativo";
+  return (
+    <ScreenContainer>
+      <ScrollView contentContainerStyle={styles.content}>
+        <AppHeader title="Lidemoda" subtitle={subtitle} branchName={branchName} />
+
+        <View style={styles.branchSelect}>
+          <BranchSelect
+            label="Sucursal"
+            branches={branches.data ?? []}
+            value={branchId}
+            onChange={selectDashboardBranch}
+            allowAll
+            allLabel="Todas las sucursales"
+            disabled={!canChangeBranch}
+          />
+        </View>
+
+        <View style={styles.actions}>
+          {canManageUsers ? (
+            <Link href={"/usuarios" as any} asChild>
+              <Button mode="contained" compact>
+                Colaboradores
+              </Button>
+            </Link>
+          ) : null}
+
+          {canCreateProduct ? (
+            <Link href="/registrar-producto" asChild>
+              <Button mode="contained" compact>
+                + Producto
+              </Button>
+            </Link>
+          ) : null}
+
+          {canSell ? (
+            <Link href="/nueva-venta" asChild>
+              <Button mode="contained-tonal" compact>
+                Nueva venta
+              </Button>
+            </Link>
+          ) : null}
+
+          <Link href="/escanear" asChild>
+            <Button mode="outlined" compact>
+              Escanear
+            </Button>
+          </Link>
+
+          <Link href={"/rotacion" as any} asChild>
+            <Button mode="outlined" compact>
+              Rotación & IA
+            </Button>
+          </Link>
+        </View>
+
+        {metrics.isLoading ? (
+          <View style={styles.center}>
+            <ActivityIndicator />
+            <Text style={styles.muted}>Cargando métricas reales...</Text>
+          </View>
+        ) : metrics.isError ? (
+          <View style={styles.center}>
+            <Text style={styles.error}>No se pudieron cargar las métricas.</Text>
+            <Button onPress={() => metrics.refetch()}>Reintentar</Button>
+          </View>
+        ) : metrics.data ? (
+          <>
+            <DashboardHero
+              totalHoy={metrics.data.weeklySales.at(-1)?.total ?? 0}
+              total7d={metrics.data.totalSales}
+              operaciones={metrics.data.salesCount}
+              sucursal={branchId === undefined ? null : branchName}
+            />
+            <KpiGrid metrics={metrics.data} />
+            <SalesWeeklyChart days={metrics.data.weeklySales} />
+            <LowStockList items={metrics.data.lowStock} />
+          </>
+        ) : (
+          <Text style={styles.muted}>No hay datos disponibles.</Text>
+        )}
+      </ScrollView>
+    </ScreenContainer>
+  );
 }
 
-const styles = StyleSheet.create({ content: { padding: spacing.lg, paddingBottom: spacing.xxxl }, branchSelect: { marginBottom: spacing.md }, actions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.lg }, center: { alignItems: "center", gap: spacing.md, paddingVertical: spacing.xxxl }, muted: { color: colors.textSecondary }, error: { color: colors.danger } });
+const styles = StyleSheet.create({
+  content: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xxxl,
+  },
+  branchSelect: {
+    marginBottom: spacing.md,
+  },
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  center: {
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.xxxl,
+  },
+  muted: {
+    color: colors.textSecondary,
+  },
+  error: {
+    color: colors.danger,
+  },
+});

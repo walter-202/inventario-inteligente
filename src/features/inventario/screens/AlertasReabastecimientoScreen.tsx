@@ -79,8 +79,8 @@ export function AlertasReabastecimientoScreen() {
 
   const handleApplySuggestion = async (sug: SugerenciaReabastecimiento) => {
     const ok = await requestConfirm({
-      title: "Emitir Despacho de Reabastecimiento (RF-26)",
-      message: `Se transferirán ${sug.cantidad_sugerida} unidades de "${sug.producto_nombre}" desde ${sug.sucursal_origen_nombre} hacia ${sug.sucursal_destino_nombre}.\n\nEsta orden quedará en tránsito (RF-06) con número de guía oficial y descontará las existencias en el origen.`,
+      title: "Emitir Despacho de Reabastecimiento",
+      message: `Se transferirán ${sug.cantidad_sugerida} unidades de "${sug.producto_nombre}" desde ${sug.sucursal_origen_nombre} hacia ${sug.sucursal_destino_nombre}.\n\nEsta orden quedará en tránsito con número de guía oficial y descontará las existencias en el origen.`,
       confirmLabel: "Emitir despacho ahora",
       danger: false,
     });
@@ -116,7 +116,7 @@ export function AlertasReabastecimientoScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <AppHeader
           title="Stock y Reabastecimiento"
-          subtitle="Alertas de quiebre y reposición inteligente (RF-08 / RF-26)"
+          subtitle="Alertas de quiebre y reposición inteligente"
         />
 
         {/* Tab Selector */}

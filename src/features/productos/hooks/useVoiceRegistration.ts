@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PermissionResponse } from "expo-modules-core";
+import { APP_LOCALE } from "../../../shared/lib/constants";
 import {
   getSpeechRecognitionModule,
   loadSpeechRecognitionAsync,
@@ -138,7 +139,7 @@ export function useVoiceRegistration() {
     setState("listening");
     try {
       native.start({
-        lang: "es-BO",
+        lang: APP_LOCALE,
         interimResults: true,
         maxAlternatives: 1,
       });

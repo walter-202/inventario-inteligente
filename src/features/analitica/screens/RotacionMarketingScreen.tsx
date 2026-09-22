@@ -24,6 +24,7 @@ import {
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppHeader } from "../../../shared/components/AppHeader";
 import { colors, spacing } from "../../../shared/theme";
+import { formatearPrecio } from "../../../shared/lib/utils";
 import { useAnalisisRotacion } from "../hooks/useRotacion";
 import type {
   MarketingInsight,
@@ -142,7 +143,7 @@ export function RotacionMarketingScreen() {
                 Ventas del Período
               </Text>
               <Text variant="titleMedium" style={styles.kpiValue}>
-                ${data.totalIngresos.toFixed(2)}
+                {formatearPrecio(data.totalIngresos)}
               </Text>
               <Text variant="bodySmall" style={styles.kpiSub}>
                 {data.totalUnidadesVendidas} prendas
@@ -156,7 +157,7 @@ export function RotacionMarketingScreen() {
                 Stock Inmovilizado
               </Text>
               <Text variant="titleMedium" style={[styles.kpiValue, { color: colors.warning }]}>
-                ${data.capitalInmovilizado.toFixed(2)}
+                {formatearPrecio(data.capitalInmovilizado)}
               </Text>
               <Text variant="bodySmall" style={styles.kpiSub}>
                 {data.productosBajaRotacion} prendas frías
@@ -173,12 +174,12 @@ export function RotacionMarketingScreen() {
         buttons={[
           {
             value: "rotacion",
-            label: "Rotación ABC (RF-26)",
+            label: "Rotación ABC",
             icon: () => <TrendingUp size={16} color={tab === "rotacion" ? colors.primary : colors.textSecondary} />,
           },
           {
             value: "marketing",
-            label: "Marketing (RF-28)",
+            label: "Marketing",
             icon: () => <Sparkles size={16} color={tab === "marketing" ? colors.primary : colors.textSecondary} />,
           },
         ]}
@@ -212,7 +213,7 @@ export function RotacionMarketingScreen() {
             <Chip
               selected={filtroClasificacion === "alta"}
               onPress={() => setFiltroClasificacion("alta")}
-              icon={() => <Flame size={14} color="#EF4444" />}
+              icon={() => <Flame size={14} color={colors.danger} />}
               style={styles.filterChip}
             >
               Alta ({data.productosAltaRotacion})
@@ -220,7 +221,7 @@ export function RotacionMarketingScreen() {
             <Chip
               selected={filtroClasificacion === "media"}
               onPress={() => setFiltroClasificacion("media")}
-              icon={() => <Zap size={14} color="#F59E0B" />}
+              icon={() => <Zap size={14} color={colors.warning} />}
               style={styles.filterChip}
             >
               Media ({data.productosMediaRotacion})
@@ -228,7 +229,7 @@ export function RotacionMarketingScreen() {
             <Chip
               selected={filtroClasificacion === "baja"}
               onPress={() => setFiltroClasificacion("baja")}
-              icon={() => <Snowflake size={14} color="#3B82F6" />}
+              icon={() => <Snowflake size={14} color={colors.info} />}
               style={styles.filterChip}
             >
               Baja / Frío ({data.productosBajaRotacion})
@@ -314,9 +315,9 @@ export function RotacionMarketingScreen() {
 
 function ProductRotationCard({ item }: { item: ProductoRotacionItem }) {
   const badgeConfig = {
-    alta: { label: "ALTA ROTACIÓN", color: "#EF4444", bg: "#FEE2E2", icon: Flame },
-    media: { label: "ROTACIÓN MEDIA", color: "#D97706", bg: "#FEF3C7", icon: Zap },
-    baja: { label: "BAJA / ESTANCADO", color: "#2563EB", bg: "#DBEAFE", icon: Snowflake },
+    alta: { label: "ALTA ROTACIÓN", color: colors.danger, bg: colors.dangerSoft, icon: Flame },
+    media: { label: "ROTACIÓN MEDIA", color: colors.warning, bg: colors.warningSoft, icon: Zap },
+    baja: { label: "BAJA / ESTANCADO", color: colors.info, bg: colors.infoSoft, icon: Snowflake },
   }[item.clasificacion];
 
   const IconComp = badgeConfig.icon;
@@ -385,21 +386,21 @@ function MarketingInsightCard({ insight }: { insight: MarketingInsight }) {
   const isEstancado = insight.tipo === "estancado";
   const isRiesgo = insight.tipo === "oportunidad";
 
-  const theme = isEstrella
-    ? { border: "#EF4444", icon: Flame, iconColor: "#DC2626", bg: "#FFF5F5" }
+  const insightTheme = isEstrella
+    ? { border: colors.danger, icon: Flame, iconColor: colors.danger, bg: colors.dangerSoft }
     : isEstancado
-      ? { border: "#3B82F6", icon: TrendingDown, iconColor: "#2563EB", bg: "#EFF6FF" }
+      ? { border: colors.info, icon: TrendingDown, iconColor: colors.info, bg: colors.infoSoft }
       : isRiesgo
-        ? { border: "#F59E0B", icon: AlertTriangle, iconColor: "#D97706", bg: "#FFFBEB" }
-        : { border: colors.primary, icon: Sparkles, iconColor: colors.primary, bg: "#F8FAFC" };
+        ? { border: colors.warning, icon: AlertTriangle, iconColor: colors.warning, bg: colors.warningSoft }
+        : { border: colors.primary, icon: Sparkles, iconColor: colors.primary, bg: colors.background };
 
-  const Icon = theme.icon;
+  const Icon = insightTheme.icon;
 
   return (
-    <Card mode="outlined" style={[styles.insightCard, { borderLeftColor: theme.border, borderLeftWidth: 4 }]}>
+    <Card mode="outlined" style={[styles.insightCard, { borderLeftColor: insightTheme.border, borderLeftWidth: 4 }]}>
       <Card.Content style={styles.insightContent}>
         <View style={styles.insightHeader}>
-          <Icon size={20} color={theme.iconColor} />
+          <Icon size={20} color={insightTheme.iconColor} />
           <Text variant="titleSmall" style={styles.insightTitle}>
             {insight.titulo}
           </Text>
@@ -407,8 +408,8 @@ function MarketingInsightCard({ insight }: { insight: MarketingInsight }) {
         <Text variant="bodySmall" style={styles.insightDesc}>
           {insight.descripcion}
         </Text>
-        <View style={[styles.actionBox, { backgroundColor: theme.bg }]}>
-          <Text variant="labelMedium" style={{ color: theme.iconColor, fontWeight: "600" }}>
+        <View style={[styles.actionBox, { backgroundColor: insightTheme.bg }]}>
+          <Text variant="labelMedium" style={{ color: insightTheme.iconColor, fontWeight: "600" }}>
             Estrategia de Marketing / Comercial:
           </Text>
           <Text variant="bodySmall" style={styles.actionText}>

@@ -88,6 +88,11 @@ export function canUseBranch(
 }
 
 export function canSelectBranch(role: Role | null | undefined): boolean {
+  return isGlobalRole(role);
+}
+
+/** Whether the role operates globally without a fixed branch assignment. */
+export function isGlobalRole(role: Role | null | undefined): boolean {
   return role === "admin";
 }
 
@@ -100,3 +105,14 @@ export const roleLabels: Record<Role, string> = {
   reponedora: "Reponedora",
   marketing: "Marketing",
 };
+
+export const roleColors: Record<Role, string> = {
+  admin: "#7C3AED",
+  encargada: "#2563EB",
+  cajera: "#059669",
+  vendedora: "#059669",
+  almacen: "#D97706",
+  reponedora: "#4B5563",
+  marketing: "#DB2777",
+};
+

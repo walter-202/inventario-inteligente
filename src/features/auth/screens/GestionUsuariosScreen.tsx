@@ -19,8 +19,9 @@ import { AppHeader } from "../../../shared/components/AppHeader";
 import { PermissionDenied } from "../components/PermissionDenied";
 import { colors, spacing } from "../../../shared/theme";
 import { useAuth } from "../hooks/useAuth";
-import { can, roleLabels } from "../lib/permissions";
-import type { Role } from "../lib/authTypes";
+import { can, isGlobalRole, roleColors, roleLabels } from "../lib/permissions";
+import { ROLE_VALUES, type Role } from "../lib/authTypes";
+import { DEFAULT_COLLABORATOR_PASSWORD, MIN_PASSWORD_LENGTH } from "../../../shared/lib/constants";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import {
   createCollaboratorUser,
@@ -29,15 +30,7 @@ import {
   type UserProfileItem,
 } from "../api/usersApi";
 
-const ROLES_ORDER: Role[] = [
-  "admin",
-  "encargada",
-  "cajera",
-  "vendedora",
-  "almacen",
-  "reponedora",
-  "marketing",
-];
+
 
 export function GestionUsuariosScreen() {
   const { profile } = useAuth();
@@ -102,7 +95,7 @@ export function GestionUsuariosScreen() {
     if (!editingUser) return;
     try {
       setSaving(true);
-      const branchToSave = selectedRole === "admin" ? null : selectedBranchId;
+      const branchToSave = isGlobalRole(selectedRole) ? null : selectedBranchId;
       await updateUserProfile(editingUser.id, selectedRole, branchToSave);
       setSnackMsg(`Rol de ${editingUser.nombre ?? editingUser.email} actualizado a ${roleLabels[selectedRole]}.`);
       closeEdit();
@@ -141,8 +134,8 @@ export function GestionUsuariosScreen() {
       setCreateError("Ingresá un correo electrónico válido.");
       return;
     }
-    if (newPassword && newPassword.length < 6) {
-      setCreateError("La contraseña debe tener al menos 6 caracteres.");
+    if (newPassword && newPassword.length < MIN_PASSWORD_LENGTH) {
+      setCreateError(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
       return;
     }
 
@@ -152,9 +145,9 @@ export function GestionUsuariosScreen() {
       await createCollaboratorUser({
         nombre: cleanNombre,
         email: cleanEmail,
-        password: newPassword || "Lidemoda2026!",
+        password: newPassword || DEFAULT_COLLABORATOR_PASSWORD,
         rol: newRole,
-        sucursalId: newRole === "admin" ? null : newBranchId,
+        sucursalId: isGlobalRole(newRole) ? null : newBranchId,
       });
 
       setSnackMsg(`Colaborador ${cleanNombre} registrado con éxito.`);
@@ -167,25 +160,7 @@ export function GestionUsuariosScreen() {
     }
   };
 
-  const getRoleColor = (rol: Role) => {
-    switch (rol) {
-      case "admin":
-        return "#7C3AED";
-      case "encargada":
-        return "#2563EB";
-      case "cajera":
-      case "vendedora":
-        return "#059669";
-      case "almacen":
-        return "#D97706";
-      case "reponedora":
-        return "#4B5563";
-      case "marketing":
-        return "#DB2777";
-      default:
-        return colors.textSecondary;
-    }
-  };
+
 
   return (
     <ScreenContainer>
@@ -237,7 +212,7 @@ export function GestionUsuariosScreen() {
           <View style={styles.list}>
             {users.map((u) => {
               const isSelf = u.id === profile?.id;
-              const roleBadgeColor = getRoleColor(u.rol);
+              const roleBadgeColor = roleColors[u.rol];
               return (
                 <Card key={u.id} mode="outlined" style={styles.userCard}>
                   <Card.Content style={styles.userCardContent}>
@@ -252,7 +227,7 @@ export function GestionUsuariosScreen() {
                       </View>
                       <Chip
                         compact
-                        textStyle={{ color: "#FFFFFF", fontWeight: "600", fontSize: 11 }}
+                        textStyle={{ color: colors.white, fontWeight: "600", fontSize: 11 }}
                         style={{ backgroundColor: roleBadgeColor }}
                       >
                         {roleLabels[u.rol]}
@@ -318,7 +293,7 @@ export function GestionUsuariosScreen() {
 
               <TextInput
                 label="Contraseña"
-                placeholder="Por defecto: Lidemoda2026!"
+                placeholder={`Por defecto: ${DEFAULT_COLLABORATOR_PASSWORD}`}
                 value={newPassword}
                 onChangeText={setNewPassword}
                 secureTextEntry
@@ -327,7 +302,7 @@ export function GestionUsuariosScreen() {
                 style={styles.dialogInput}
               />
               <Text variant="bodySmall" style={[styles.muted, { marginBottom: spacing.sm }]}>
-                Si lo dejás vacío, se asignará "Lidemoda2026!".
+                Si lo dejás vacío, se asignará "{DEFAULT_COLLABORATOR_PASSWORD}".
               </Text>
 
               <Divider style={{ marginVertical: spacing.xs }} />
@@ -339,10 +314,10 @@ export function GestionUsuariosScreen() {
                 onValueChange={(val) => setNewRole(val as Role)}
                 value={newRole}
               >
-                {ROLES_ORDER.map((r) => (
+                {ROLE_VALUES.map((r) => (
                   <View key={r} style={styles.radioRow}>
                     <RadioButton.Item
-                      label={`${roleLabels[r]} ${r === "admin" ? "(Analítico Global)" : ""}`}
+                      label={`${roleLabels[r]} ${isGlobalRole(r) ? "(Analítico Global)" : ""}`}
                       value={r}
                       mode="android"
                       style={{ paddingVertical: 2 }}
@@ -351,7 +326,7 @@ export function GestionUsuariosScreen() {
                 ))}
               </RadioButton.Group>
 
-              {newRole !== "admin" && (
+              {!isGlobalRole(newRole) && (
                 <>
                   <Divider style={{ marginVertical: spacing.xs }} />
                   <Text variant="titleSmall" style={[styles.sectionTitle, { marginTop: spacing.xs }]}>
@@ -406,10 +381,10 @@ export function GestionUsuariosScreen() {
                     onValueChange={(val) => setSelectedRole(val as Role)}
                     value={selectedRole}
                   >
-                    {ROLES_ORDER.map((r) => (
+                    {ROLE_VALUES.map((r) => (
                       <View key={r} style={styles.radioRow}>
                         <RadioButton.Item
-                          label={`${roleLabels[r]} ${r === "admin" ? "(Analítico Global)" : ""}`}
+                          label={`${roleLabels[r]} ${isGlobalRole(r) ? "(Analítico Global)" : ""}`}
                           value={r}
                           mode="android"
                           style={{ paddingVertical: 2 }}
@@ -418,7 +393,7 @@ export function GestionUsuariosScreen() {
                     ))}
                   </RadioButton.Group>
 
-                  {selectedRole !== "admin" && (
+                  {!isGlobalRole(selectedRole) && (
                     <>
                       <Text variant="titleSmall" style={[styles.sectionTitle, { marginTop: spacing.md }]}>
                         Sucursal Asignada:
@@ -472,7 +447,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxl,
   },
   introCard: {
-    backgroundColor: "#F3F4F6",
+    backgroundColor: colors.surfaceSecondary,
     padding: spacing.md,
     borderRadius: 8,
     marginBottom: spacing.lg,
@@ -521,7 +496,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
+    borderTopColor: colors.border,
     paddingTop: spacing.sm,
     marginTop: spacing.xs,
   },

@@ -8,8 +8,8 @@ import { AppHeader } from "../../../shared/components/AppHeader";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
 import { AppSearchbar } from "../../../shared/components/AppSearchbar";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
-import { extraerMensajeError, formatearPrecio } from "../../../shared/lib/utils";
-import { colors, spacing } from "../../../shared/theme";
+import { extraerMensajeError, formatearFechaHora, formatearPrecio } from "../../../shared/lib/utils";
+import { colors, statusColors, spacing } from "../../../shared/theme";
 import type { InventarioItem, PaymentMethod, Producto, VentaResumen } from "../../../shared/types/domain";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
@@ -297,7 +297,7 @@ function VentasContent() {
       motivo,
     });
     Alert.alert(
-      "Venta anulada con éxito (RF-17)",
+      "Venta anulada con éxito",
       `La Venta #${res.venta_id} fue anulada y se revirtieron ${res.items_revertidos} línea(s) de productos al stock de la sucursal.`,
     );
     void sales.refetch();
@@ -409,7 +409,7 @@ function VentasContent() {
                     )}
                   </View>
                   <Text variant="bodySmall" style={styles.muted}>
-                    {new Date(sale.fecha).toLocaleString("es-BO")} · Pago: {sale.metodo_pago}
+                    {formatearFechaHora(sale.fecha)} · Pago: {sale.metodo_pago}
                   </Text>
                   {isAnulada && sale.motivo_anulacion ? (
                     <Text variant="bodySmall" style={styles.motivoAnuladaText}>
@@ -425,7 +425,7 @@ function VentasContent() {
                     <Button
                       compact
                       mode="text"
-                      textColor="#DC2626"
+                      textColor={colors.danger}
                       onPress={() => setCancelSaleTarget(sale)}
                     >
                       Anular
@@ -506,7 +506,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   totalValueAnulada: {
-    color: "#94A3B8",
+    color: statusColors.disabled,
     textDecorationLine: "line-through",
   },
   saleCard: {
@@ -514,8 +514,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   saleCardAnulada: {
-    backgroundColor: "#F8FAFC",
-    borderColor: "#E2E8F0",
+    backgroundColor: colors.background,
+    borderColor: colors.border,
     opacity: 0.85,
   },
   saleCardContent: {
@@ -536,26 +536,26 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   saleTitleAnulada: {
-    color: "#64748B",
+    color: colors.textMuted,
   },
   chipCompletada: {
-    backgroundColor: "#E8F5E9",
+    backgroundColor: statusColors.completed.bg,
   },
   chipTextCompletada: {
-    color: "#2E7D32",
+    color: statusColors.completed.text,
     fontSize: 10,
     fontWeight: "700",
   },
   chipAnulada: {
-    backgroundColor: "#FFEBEE",
+    backgroundColor: statusColors.cancelled.bg,
   },
   chipTextAnulada: {
-    color: "#C62828",
+    color: statusColors.cancelled.text,
     fontSize: 10,
     fontWeight: "700",
   },
   motivoAnuladaText: {
-    color: "#C62828",
+    color: statusColors.cancelled.text,
     fontStyle: "italic",
   },
   saleActionWrap: {

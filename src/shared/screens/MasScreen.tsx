@@ -5,7 +5,7 @@ import { Button, Card, Text } from "react-native-paper";
 import { ScreenContainer } from "../components/ScreenContainer";
 import { AppHeader } from "../components/AppHeader";
 import { useConfirm } from "../components/ConfirmDialog";
-import { spacing } from "../theme";
+import { colors, spacing } from "../theme";
 import { useAuth } from "../../features/auth/hooks/useAuth";
 import { can, roleLabels } from "../../features/auth/lib/permissions";
 
@@ -41,24 +41,24 @@ export function MasScreen() {
           <Text variant="titleMedium">Operaciones y Auditoría</Text>
           {can(profile?.rol, "users.manage") && (
             <Link href={"/usuarios" as any} asChild>
-              <Button mode="contained-tonal" icon={() => <Users size={18} color="#7C3AED" />}>
+              <Button mode="contained-tonal" icon={() => <Users size={18} color={colors.secondary} />}>
                 Colaboradores y Roles (Admin)
               </Button>
             </Link>
           )}
           <Link href={"/rotacion" as any} asChild>
-            <Button mode="outlined" icon={() => <TrendingUp size={18} color="#2563EB" />}>
-              Rotación y Marketing IA (RF-26/28)
+            <Button mode="outlined" icon={() => <TrendingUp size={18} color={colors.primary} />}>
+              Rotación y Marketing IA
             </Button>
           </Link>
           <Link href={"/alertas-stock" as any} asChild>
-            <Button mode="outlined" icon={() => <AlertTriangle size={18} color="#D97706" />}>
-              Stock Crítico y Reabastecimiento IA (RF-08/26)
+            <Button mode="outlined" icon={() => <AlertTriangle size={18} color={colors.warning} />}>
+              Stock Crítico y Reabastecimiento IA
             </Button>
           </Link>
           <Link href={"/kardex" as any} asChild>
             <Button mode="outlined" icon={() => <BookOpen size={18} />}>
-              Kardex e Historial de Movimientos (RF-12)
+              Kardex e Historial de Movimientos
             </Button>
           </Link>
           <Link href="/movimientos" asChild>

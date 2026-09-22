@@ -71,35 +71,35 @@ function VoiceStatusBar({ state, transcript, error, onClear }: VoiceStatusBarPro
     switch (state) {
       case "listening":
         return {
-          icon: <Mic size={18} color="#EF4444" />,
+          icon: <Mic size={18} color={colors.danger} />,
           label: "Escuchando dictado...",
-          color: "#DC2626",
-          bg: "#FEF2F2",
-          border: "#FCA5A5",
+          color: colors.danger,
+          bg: colors.dangerSoft,
+          border: colors.danger,
         };
       case "interpreting":
         return {
-          icon: <Sparkles size={18} color="#2563EB" />,
+          icon: <Sparkles size={18} color={colors.primary} />,
           label: "Interpretando con IA...",
-          color: "#1D4ED8",
-          bg: "#EFF6FF",
-          border: "#93C5FD",
+          color: colors.primaryDark,
+          bg: colors.primarySoft,
+          border: colors.primaryBorder,
         };
       case "done":
         return {
-          icon: <CheckCircle2 size={18} color="#059669" />,
+          icon: <CheckCircle2 size={18} color={colors.success} />,
           label: "¡Campos completados por voz!",
-          color: "#047857",
-          bg: "#ECFDF5",
-          border: "#6EE7B7",
+          color: colors.successDark,
+          bg: colors.successSoft,
+          border: colors.success,
         };
       case "error":
         return {
-          icon: <AlertCircle size={18} color="#DC2626" />,
+          icon: <AlertCircle size={18} color={colors.danger} />,
           label: error || "Error al interpretar",
-          color: "#B91C1C",
-          bg: "#FEF2F2",
-          border: "#F87171",
+          color: colors.danger,
+          bg: colors.dangerSoft,
+          border: colors.danger,
         };
       default:
         return null;
@@ -324,7 +324,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
               />
               <IconButton
                 mode={voice.state === "listening" ? "contained" : "contained-tonal"}
-                containerColor={voice.state === "listening" ? "#EF4444" : colors.primarySoft}
+                containerColor={voice.state === "listening" ? colors.danger : colors.primarySoft}
                 icon={() =>
                   voice.state === "listening" ? (
                     <Square size={22} color={colors.white} />
@@ -596,7 +596,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#EF4444",
+    backgroundColor: colors.danger,
   },
   micButton: {
     borderRadius: 24,
@@ -608,12 +608,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   examplesCard: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.background,
     padding: spacing.md,
     borderRadius: 14,
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
     gap: spacing.xs,
   },
   examplesTitle: {
@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
   },
   exampleChip: {
     backgroundColor: colors.white,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
     borderWidth: 1,
   },
   exampleChipText: {
@@ -667,7 +667,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   categoryChip: {
-    backgroundColor: "#F1F5F9",
+    backgroundColor: colors.surfaceSecondary,
     borderRadius: 8,
   },
   categoryChipSelected: {

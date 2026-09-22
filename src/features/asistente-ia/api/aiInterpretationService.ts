@@ -139,17 +139,12 @@ export function limpiarNombreProducto(nombre: string): string {
     .trim();
 }
 
-export const KNOWN_BRANCHES = [
-  "san miguel",
-  "calacoto",
-  "comercio",
-  "ceja",
-  "central",
-  "montenegro",
-  "miraflores",
-  "sopocachi",
-  "equipetrol",
-];
+/**
+ * @deprecated Branch names are now loaded dynamically from Supabase.
+ * Kept as an empty-array default for backward compatibility with callers
+ * that don't pass a branches list.
+ */
+export const KNOWN_BRANCHES: string[] = [];
 
 function extractSucursalMention(text: string, branches: string[] = KNOWN_BRANCHES): string | null {
   const normalized = text.toLowerCase();

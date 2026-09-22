@@ -7,6 +7,7 @@ import type { ChatSession, EstadoSesion } from "../lib/chatSession";
 import type { PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { ProviderSelectModal } from "./ProviderSelectModal";
 import { colors, spacing } from "../../../shared/theme";
+import { formatearFechaCorta } from "../../../shared/lib/utils";
 
 interface SessionDrawerProps {
   open: boolean;
@@ -46,12 +47,7 @@ const MOTORES: { id: PreferredMode; label: string }[] = [
 
 function fechaCorta(timestamp: number): string {
   try {
-    return new Date(timestamp).toLocaleString("es-BO", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return formatearFechaCorta(timestamp);
   } catch {
     return "";
   }

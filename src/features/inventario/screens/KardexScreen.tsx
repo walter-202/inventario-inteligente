@@ -27,6 +27,7 @@ import { AppHeader } from "../../../shared/components/AppHeader";
 import { BranchSelect } from "../../../shared/components/BranchSelect";
 import { AppSearchbar } from "../../../shared/components/AppSearchbar";
 import { colors, spacing } from "../../../shared/theme";
+import { formatearFechaHora } from "../../../shared/lib/utils";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useKardex } from "../hooks/useKardex";
 import { useProductos } from "../../productos/hooks/useProductos";
@@ -124,7 +125,7 @@ export function KardexScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <AppHeader
           title="Kardex e Historial"
-          subtitle="Trazabilidad y saldos de inventario (RF-12)"
+          subtitle="Trazabilidad y saldos de inventario"
         />
 
         {/* Filters */}
@@ -288,7 +289,7 @@ export function KardexScreen() {
                     <View style={styles.dateRow}>
                       <Clock size={12} color={colors.textMuted} />
                       <Text variant="labelSmall" style={styles.dateText}>
-                        {new Date(item.fecha).toLocaleString("es-BO")}
+                        {formatearFechaHora(item.fecha)}
                       </Text>
                     </View>
                   </View>

@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Card, Chip, HelperText, Text, TextInput } from "react-native-paper";
 
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
+import { DEFAULT_COLLABORATOR_PASSWORD } from "../../../shared/lib/constants";
 import { colors, spacing } from "../../../shared/theme";
 import { getAuthErrorMessage } from "../api/authApi";
 import { useAuth } from "../hooks/useAuth";
@@ -117,7 +118,7 @@ export function LoginScreen() {
                     mode="outlined"
                     onPress={() => {
                       setEmail("admin.lidemoda@gmail.com");
-                      setPassword("Lidemoda2026!");
+                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
                     }}
                   >
                     Admin
@@ -127,7 +128,7 @@ export function LoginScreen() {
                     mode="outlined"
                     onPress={() => {
                       setEmail("cajera.montenegro@gmail.com");
-                      setPassword("Lidemoda2026!");
+                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
                     }}
                   >
                     Cajera
@@ -137,7 +138,7 @@ export function LoginScreen() {
                     mode="outlined"
                     onPress={() => {
                       setEmail("encargada.comercio@gmail.com");
-                      setPassword("Lidemoda2026!");
+                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
                     }}
                   >
                     Encargada
@@ -147,7 +148,7 @@ export function LoginScreen() {
                     mode="outlined"
                     onPress={() => {
                       setEmail("almacen.central@gmail.com");
-                      setPassword("Lidemoda2026!");
+                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
                     }}
                   >
                     Almacén
@@ -157,7 +158,7 @@ export function LoginScreen() {
                     mode="outlined"
                     onPress={() => {
                       setEmail("vendedora.ceja@gmail.com");
-                      setPassword("Lidemoda2026!");
+                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
                     }}
                   >
                     Vendedora

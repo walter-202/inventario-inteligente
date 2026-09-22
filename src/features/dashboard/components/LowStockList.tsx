@@ -33,7 +33,7 @@ export function LowStockList({ items }: { items: DashboardLowStockItem[] }) {
       <Card.Actions style={styles.actions}>
         <Link href={"/alertas-stock" as any} asChild>
           <Button mode="text" compact>
-            Ver alertas y sugerencias IA (RF-08/26)
+            Ver alertas y sugerencias IA
           </Button>
         </Link>
       </Card.Actions>

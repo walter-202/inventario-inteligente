@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { supabase } from "../../../shared/lib/supabase";
 import { ROLE_VALUES, type AuthBlockedReason, type Role, type UserProfile } from "../lib/authTypes";
+import { isGlobalRole } from "../lib/permissions";
 
 export const SignInSchema = z.object({
   email: z.string().trim().toLowerCase().email("Ingresa un correo válido."),
@@ -63,7 +64,7 @@ export async function fetchProfile(userId: string): Promise<UserProfile> {
   const profile = result.data as UserProfile;
   // Only an administrator may be global. Every operational account needs a
   // server-assigned branch; the app never infers one from client state.
-  if (profile.rol !== "admin" && profile.sucursal_id === null) {
+  if (!isGlobalRole(profile.rol) && profile.sucursal_id === null) {
     throw new AuthProfileError("unassigned-profile", "Administración todavía no te asignó una sucursal.");
   }
   return profile;

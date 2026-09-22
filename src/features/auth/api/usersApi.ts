@@ -1,5 +1,7 @@
 import { supabase } from "../../../shared/lib/supabase";
 import type { Role } from "../lib/authTypes";
+import { isGlobalRole } from "../lib/permissions";
+import { DEFAULT_COLLABORATOR_PASSWORD, MIN_PASSWORD_LENGTH } from "../../../shared/lib/constants";
 
 export interface UserProfileItem {
   id: string;
@@ -39,7 +41,7 @@ export async function fetchUserProfiles(): Promise<UserProfileItem[]> {
     nombre: row.nombre,
     rol: row.rol as Role,
     sucursal_id: row.sucursal_id,
-    sucursal_nombre: row.sucursales?.nombre ?? (row.rol === "admin" ? "Global / Todas" : "Sin asignar"),
+    sucursal_nombre: row.sucursales?.nombre ?? (isGlobalRole(row.rol as Role) ? "Global / Todas" : "Sin asignar"),
     created_at: row.created_at,
     updated_at: row.updated_at,
   }));
@@ -95,10 +97,10 @@ export async function createCollaboratorUser(params: {
 }): Promise<{ success: boolean; id: string }> {
   const { data, error } = await supabase.rpc("admin_crear_usuario", {
     p_email: params.email,
-    p_password: params.password || "Lidemoda2026!",
+    p_password: params.password || DEFAULT_COLLABORATOR_PASSWORD,
     p_nombre: params.nombre,
     p_rol: params.rol,
-    p_sucursal_id: params.rol === "admin" ? null : (params.sucursalId as any),
+    p_sucursal_id: isGlobalRole(params.rol) ? null : (params.sucursalId as any),
   });
 
   if (error) {
@@ -109,7 +111,7 @@ export async function createCollaboratorUser(params: {
       throw new Error("El formato del correo electrónico no es válido.");
     }
     if (error.message.includes("PASSWORD_TOO_SHORT")) {
-      throw new Error("La contraseña debe tener al menos 6 caracteres.");
+      throw new Error(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
     }
     throw new Error(`Error al crear colaborador: ${error.message}`);
   }

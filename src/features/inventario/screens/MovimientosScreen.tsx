@@ -23,7 +23,7 @@ import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 import { useEmitirDespacho } from "../hooks/useDespachos";
 import { useRegistrarMerma } from "../hooks/useMermas";
 import { RecepcionDespachosList } from "../components/RecepcionDespachosList";
-import { MOTIVOS_MERMA, type MotivoMerma } from "../../../shared/types/domain";
+import { MOTIVOS_MERMA, MOTIVOS_MERMA_LABELS, type MotivoMerma } from "../../../shared/types/domain";
 import { AlertOctagon } from "lucide-react-native";
 
 type MovementType = "entrada" | "salida" | "merma" | "despacho" | "recepcion";
@@ -131,7 +131,7 @@ function MovimientosForm() {
     }
 
     const ok = await requestConfirm({
-      title: "Emitir orden de despacho (RF-06)",
+      title: "Emitir orden de despacho",
       message: `Se despacharán ${qtyNum} unids de "${product.nombre}" (${product.codigo}) desde ${selectedBranchName} hacia ${destinationBranchName}.\n\nEl stock se descontará de ${selectedBranchName} y quedará registrado como "En tránsito" hasta que la sucursal destino confirme su recepción.`,
       confirmLabel: "Emitir despacho",
       danger: false,
@@ -216,14 +216,7 @@ function MovimientosForm() {
   const isRecepcion = type === "recepcion";
   const isMerma = type === "merma";
 
-  const MOTIVO_LABELS: Record<MotivoMerma, string> = {
-    rotura: "Rotura / Desgarro",
-    mancha: "Mancha irreparable",
-    falla_costura: "Falla de costura",
-    deterioro: "Deterioro / Humedad",
-    extravio: "Faltante / Extravío",
-    otro: "Otro motivo justificado",
-  };
+
 
   const submitMerma = async () => {
     if (!product || branchId === null) {
@@ -241,8 +234,8 @@ function MovimientosForm() {
     }
 
     const ok = await requestConfirm({
-      title: "Registrar baja por merma (RF-09)",
-      message: `Se dará de baja definitiva a ${qtyNum} unids de "${product.nombre}" (${product.codigo}) en ${selectedBranchName}.\n\nMotivo: ${MOTIVO_LABELS[motivoMerma]}.\n\nEsta acción descontará el stock de inmediato y quedará auditada en el Kardex.`,
+      title: "Registrar baja por merma",
+      message: `Se dará de baja definitiva a ${qtyNum} unids de "${product.nombre}" (${product.codigo}) en ${selectedBranchName}.\n\nMotivo: ${MOTIVOS_MERMA_LABELS[motivoMerma]}.\n\nEsta acción descontará el stock de inmediato y quedará auditada en el Kardex.`,
       confirmLabel: "Confirmar baja por merma",
       danger: true,
     });
@@ -288,11 +281,11 @@ function MovimientosForm() {
             title="Movimientos y Despachos"
             subtitle={
               isRecepcion
-                ? "Confirmación de mercadería en destino (RF-07)"
+                ? "Confirmación de mercadería en destino"
                 : isDespacho
-                ? "Emisión de despacho en tránsito (RF-06)"
+                ? "Emisión de despacho en tránsito"
                 : isMerma
-                ? "Baja justificada de prendas dañadas (RF-09)"
+                ? "Baja justificada de prendas dañadas"
                 : "Entradas y salidas de stock"
             }
           />
@@ -363,7 +356,7 @@ function MovimientosForm() {
               {isMerma ? (
                 <>
                   <Text variant="labelLarge" style={styles.label}>
-                    Motivo del daño o baja (RF-09)
+                    Motivo del daño o baja
                   </Text>
                   <View style={styles.motivosGrid}>
                     {MOTIVOS_MERMA.map((m) => {
@@ -377,7 +370,7 @@ function MovimientosForm() {
                           textStyle={isSelected ? styles.motivoChipTextSelected : undefined}
                           compact
                         >
-                          {MOTIVO_LABELS[m]}
+                          {MOTIVOS_MERMA_LABELS[m]}
                         </Chip>
                       );
                     })}
@@ -510,7 +503,7 @@ function MovimientosForm() {
             ) : isMerma ? (
               <Button
                 mode="contained"
-                buttonColor="#DC2626"
+                buttonColor={colors.danger}
                 icon={() => <AlertOctagon size={18} color={colors.white} />}
                 onPress={submitMerma}
                 loading={registrarMermaMutation.isPending}
@@ -518,7 +511,7 @@ function MovimientosForm() {
                 style={styles.submitButton}
                 contentStyle={styles.submitButtonContent}
               >
-                Registrar baja por merma (RF-09)
+                Registrar baja por merma
               </Button>
             ) : (
               <Button
@@ -571,7 +564,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSecondary,
   },
   motivoChipSelected: {
-    backgroundColor: "#DC2626",
+    backgroundColor: colors.danger,
   },
   motivoChipTextSelected: {
     color: colors.white,

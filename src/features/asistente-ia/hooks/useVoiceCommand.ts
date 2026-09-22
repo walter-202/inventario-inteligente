@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PermissionResponse } from "expo-modules-core";
+import { APP_LOCALE } from "../../../shared/lib/constants";
 import {
   getSpeechRecognitionModule,
   loadSpeechRecognitionAsync,
@@ -131,13 +132,55 @@ export function useVoiceCommand() {
       // requiresOnDeviceRecognition se deja en false a propósito: en la mayoría
       // de los dispositivos los modelos on-device no están descargados y forzarlos
       // rompe el dictado. maxAlternatives 3 mejora la captura de SKUs.
-      native.start({ lang: "es-BO", interimResults: true, maxAlternatives: 3 });
+      native.start({ lang: APP_LOCALE, interimResults: true, maxAlternatives: 3 });
     } catch (startError) {
       setRecording(false);
       setError(startError instanceof Error ? startError.message : "No se pudo iniciar el reconocimiento.");
     }
   }, [permission, recording, ensureNative]);
-  const stop = useCallback(() => { try { getSpeechRecognitionModule()?.stop(); } catch { /* noop */ } }, []);
-  const interpret = useCallback(async (contexto?: VozContexto): Promise<ResultadoInterpretacion> => { setInterpreting(true); setError(null); try { return await interpretarVoz(transcript, contexto); } catch (interpretationError) { const message = interpretationError instanceof Error ? interpretationError.message : "No se pudo interpretar la operación."; setError(message); throw interpretationError; } finally { setInterpreting(false); } }, [transcript]);
-  return { isAvailable, blocked, permission, permissionLoading, permissionError, transcript, setTranscript, recording, error, interpreting, requestPermission, start, stop, interpret };
+
+  const stop = useCallback(() => {
+    try {
+      getSpeechRecognitionModule()?.stop();
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const interpret = useCallback(
+    async (contexto?: VozContexto): Promise<ResultadoInterpretacion> => {
+      setInterpreting(true);
+      setError(null);
+      try {
+        return await interpretarVoz(transcript, contexto);
+      } catch (interpretationError) {
+        const message =
+          interpretationError instanceof Error
+            ? interpretationError.message
+            : "No se pudo interpretar la operación.";
+        setError(message);
+        throw interpretationError;
+      } finally {
+        setInterpreting(false);
+      }
+    },
+    [transcript],
+  );
+
+  return {
+    isAvailable,
+    blocked,
+    permission,
+    permissionLoading,
+    permissionError,
+    transcript,
+    setTranscript,
+    recording,
+    error,
+    interpreting,
+    requestPermission,
+    start,
+    stop,
+    interpret,
+  };
 }

@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Button, Dialog, HelperText, Portal, Text, TextInput } from "react-native-paper";
 import { AlertTriangle } from "lucide-react-native";
 import { colors, spacing } from "../../../shared/theme";
-import { formatearPrecio } from "../../../shared/lib/utils";
+import { formatearFechaHora, formatearPrecio } from "../../../shared/lib/utils";
 import type { VentaResumen } from "../../../shared/types/domain";
 
 export interface SaleCancelDialogProps {
@@ -53,7 +53,7 @@ export function SaleCancelDialog({
       <Dialog visible={visible} onDismiss={handleDismiss} style={styles.dialog}>
         <Dialog.Title style={styles.title}>
           <View style={styles.titleRow}>
-            <AlertTriangle size={22} color="#DC2626" />
+            <AlertTriangle size={22} color={colors.danger} />
             <Text variant="titleLarge" style={styles.titleText}>
               Anular Venta #{sale.id}
             </Text>
@@ -66,7 +66,7 @@ export function SaleCancelDialog({
               Monto total: <Text style={styles.bold}>{formatearPrecio(sale.total)}</Text>
             </Text>
             <Text variant="bodySmall" style={styles.muted}>
-              Fecha: {new Date(sale.fecha).toLocaleString("es-BO")} · Pago: {sale.metodo_pago}
+              Fecha: {formatearFechaHora(sale.fecha)} · Pago: {sale.metodo_pago}
             </Text>
           </View>
 
@@ -100,7 +100,7 @@ export function SaleCancelDialog({
           </Button>
           <Button
             mode="contained"
-            buttonColor="#DC2626"
+            buttonColor={colors.danger}
             onPress={handleConfirm}
             loading={loading}
             disabled={loading}
@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   },
   titleText: {
     fontWeight: "700",
-    color: "#DC2626",
+    color: colors.danger,
   },
   content: {
     gap: spacing.sm,

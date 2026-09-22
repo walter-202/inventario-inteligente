@@ -117,6 +117,15 @@ export const MOTIVOS_MERMA = [
 
 export type MotivoMerma = (typeof MOTIVOS_MERMA)[number];
 
+export const MOTIVOS_MERMA_LABELS: Record<MotivoMerma, string> = {
+  rotura: "Rotura / Desgarro",
+  mancha: "Mancha irreparable",
+  falla_costura: "Falla de costura",
+  deterioro: "Deterioro / Humedad",
+  extravio: "Faltante / Extravío",
+  otro: "Otro motivo justificado",
+};
+
 export interface Merma {
   id: number;
   sucursal_id: number;

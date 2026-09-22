@@ -5,7 +5,7 @@ import { CheckCircle2, PackageCheck, Truck } from "lucide-react-native";
 import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import { StatusBadge } from "../../../shared/components/StatusBadge";
 import { colors, spacing } from "../../../shared/theme";
-import { extraerMensajeError } from "../../../shared/lib/utils";
+import { extraerMensajeError, formatearFechaCorta } from "../../../shared/lib/utils";
 import { useConfirmarRecepcionDespacho, useOrdenesDespacho } from "../hooks/useDespachos";
 import type { OrdenDespacho } from "../../../shared/types/domain";
 
@@ -131,12 +131,7 @@ export function RecepcionDespachosList({ sucursalDestinoId, onSuccess }: Recepci
                   <Text style={styles.quantityHighlight}>{orden.cantidad_despachada} unids</Text>
                 </Text>
                 <Text variant="bodySmall" style={styles.muted}>
-                  {new Date(orden.fecha_despacho).toLocaleDateString("es-BO", {
-                    day: "2-digit",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatearFechaCorta(orden.fecha_despacho)}
                 </Text>
               </View>
 
@@ -197,7 +192,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     color: colors.danger,
-    backgroundColor: "#FEE2E2",
+    backgroundColor: colors.dangerSoft,
     padding: spacing.sm,
     borderRadius: 8,
   },

@@ -26,8 +26,8 @@ import {
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ScreenContainer } from "../../../shared/components/ScreenContainer";
-import { colors, spacing } from "../../../shared/theme";
-import { formatearPrecio } from "../../../shared/lib/utils";
+import { colors, movementColors, spacing } from "../../../shared/theme";
+import { formatearFechaCorta, formatearPrecio } from "../../../shared/lib/utils";
 import { buscarProductoPorId } from "../api/productosApi";
 import { useProductoDetalle } from "../hooks/useProductoDetalle";
 import { useActualizarProducto } from "../hooks/useActualizarProducto";
@@ -56,8 +56,7 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
 
   const formatDate = (isoString: string) => {
     try {
-      const d = new Date(isoString);
-      return `${d.toLocaleDateString("es-BO")} ${d.toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit" })}`;
+      return formatearFechaCorta(isoString);
     } catch {
       return isoString;
     }
@@ -219,7 +218,7 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
                   <Surface key={item.sucursalId} style={styles.branchCard} elevation={0}>
                     <View style={styles.branchCardLeft}>
                       <View style={[styles.storeIconCircle, isZero && styles.storeIconCircleZero]}>
-                        <Store size={16} color={isZero ? "#94A3B8" : colors.primary} />
+                        <Store size={16} color={isZero ? colors.textMuted : colors.primary} />
                       </View>
                       <Text variant="bodyMedium" style={styles.branchNameText}>
                         {cleanName}
@@ -237,11 +236,11 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
                       ]}
                     >
                       {isZero ? (
-                        <XCircle size={14} color="#EF4444" />
+                        <XCircle size={14} color={colors.danger} />
                       ) : isLow ? (
-                        <AlertTriangle size={14} color="#F59E0B" />
+                        <AlertTriangle size={14} color={colors.warning} />
                       ) : (
-                        <CheckCircle2 size={14} color="#10B981" />
+                        <CheckCircle2 size={14} color={colors.success} />
                       )}
                       <Text
                         variant="labelSmall"
@@ -319,11 +318,11 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
                         ]}
                       >
                         {isEntrada ? (
-                          <ArrowDownLeft size={14} color="#15803D" />
+                          <ArrowDownLeft size={14} color={movementColors.entrada.icon} />
                         ) : isTransfer ? (
-                          <ArrowRightLeft size={14} color="#1D4ED8" />
+                          <ArrowRightLeft size={14} color={movementColors.transferencia.icon} />
                         ) : (
-                          <ArrowUpRight size={14} color="#B45309" />
+                          <ArrowUpRight size={14} color={movementColors.salida.icon} />
                         )}
                         <Text
                           variant="labelSmall"
@@ -344,7 +343,11 @@ export function ProductoDetalleScreen({ id }: ProductoDetalleScreenProps) {
                         variant="titleMedium"
                         style={[
                           styles.movementQtyText,
-                          isEntrada ? { color: "#15803D" } : isTransfer ? { color: "#1D4ED8" } : { color: "#B45309" },
+                          isEntrada
+                            ? { color: movementColors.entrada.text }
+                            : isTransfer
+                            ? { color: movementColors.transferencia.text }
+                            : { color: colors.warning },
                         ]}
                       >
                         {isEntrada ? `+${mov.cantidad}` : isTransfer ? `${mov.cantidad}` : `-${mov.cantidad}`} uds
@@ -427,7 +430,7 @@ const styles = StyleSheet.create({
   },
   navBackButton: {
     margin: 0,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: colors.surfaceSecondary,
     borderRadius: 12,
   },
   navTitles: {
@@ -474,7 +477,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: colors.surfaceSecondary,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -502,7 +505,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   totalKpiCard: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.background,
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 14,
@@ -553,7 +556,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
   },
   branchCardLeft: {
     flexDirection: "row",
@@ -570,7 +573,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   storeIconCircleZero: {
-    backgroundColor: "#F1F5F9",
+    backgroundColor: colors.surfaceSecondary,
   },
   branchNameText: {
     color: colors.textPrimary,
@@ -585,25 +588,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   stockBadgeGood: {
-    backgroundColor: "#DCFCE7",
+    backgroundColor: movementColors.entrada.bg,
   },
   stockBadgeLow: {
-    backgroundColor: "#FEF3C7",
+    backgroundColor: colors.warningSoft,
   },
   stockBadgeZero: {
-    backgroundColor: "#FEE2E2",
+    backgroundColor: colors.dangerSoft,
   },
   stockBadgeText: {
     fontWeight: "700",
   },
   stockTextGood: {
-    color: "#15803D",
+    color: movementColors.entrada.text,
   },
   stockTextLow: {
-    color: "#B45309",
+    color: colors.warning,
   },
   stockTextZero: {
-    color: "#B91C1C",
+    color: movementColors.salida.text,
   },
   transferButton: {
     borderRadius: 12,
@@ -611,13 +614,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   emptyHistorialCard: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: colors.background,
     padding: spacing.xxl,
     borderRadius: 14,
     alignItems: "center",
     gap: spacing.sm,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
   },
   emptyHistorialText: {
     color: colors.textMuted,
@@ -631,7 +634,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: colors.border,
     gap: 4,
   },
   movementTopRow: {
@@ -648,26 +651,26 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   movBadgeEntrada: {
-    backgroundColor: "#DCFCE7",
+    backgroundColor: movementColors.entrada.bg,
   },
   movBadgeSalida: {
-    backgroundColor: "#FEF3C7",
+    backgroundColor: colors.warningSoft,
   },
   movBadgeTransfer: {
-    backgroundColor: "#DBEAFE",
+    backgroundColor: movementColors.transferencia.bg,
   },
   movementBadgeText: {
     fontWeight: "700",
     fontSize: 11,
   },
   movTextEntrada: {
-    color: "#15803D",
+    color: movementColors.entrada.text,
   },
   movTextSalida: {
-    color: "#B45309",
+    color: colors.warning,
   },
   movTextTransfer: {
-    color: "#1D4ED8",
+    color: movementColors.transferencia.text,
   },
   movementQtyText: {
     fontWeight: "800",

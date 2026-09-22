@@ -43,6 +43,21 @@ export const colors = {
   backdrop: "rgba(15, 23, 42, 0.45)",
 } as const;
 
+/** Semantic tokens for entity status badges (ventas, despachos). */
+export const statusColors = {
+  completed: { bg: "#E8F5E9", text: "#2E7D32" },
+  cancelled: { bg: "#FFEBEE", text: "#C62828" },
+  inTransit: { bg: "#FEF3C7", text: "#B45309" },
+  disabled: "#94A3B8",
+} as const;
+
+/** Semantic tokens for inventory movement direction. */
+export const movementColors = {
+  entrada: { bg: "#DCFCE7", text: "#15803D", icon: "#15803D" },
+  salida: { bg: "#FEE2E2", text: "#B91C1C", icon: "#B45309" },
+  transferencia: { bg: "#DBEAFE", text: "#1D4ED8", icon: "#1D4ED8" },
+} as const;
+
 export const gradients = {
   /** Héroe del panel: naranja mercado → rosa. */
   sunset: ["#F97316", "#EC4899"] as const,
@@ -90,4 +105,4 @@ export const paperTheme = {
 };
 
 export type AppTheme = typeof paperTheme;
-export const theme = { colors, gradients, typography, spacing, radius, shadows, paperTheme };
+export const theme = { colors, statusColors, movementColors, gradients, typography, spacing, radius, shadows, paperTheme };

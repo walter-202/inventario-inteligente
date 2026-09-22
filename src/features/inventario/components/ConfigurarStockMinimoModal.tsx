@@ -59,7 +59,7 @@ export function ConfigurarStockMinimoModal({
           <View style={styles.titleRow}>
             <Sliders size={20} color={colors.primary} />
             <Text variant="titleLarge" style={styles.titleText}>
-              Umbral de Stock Mínimo (RF-08)
+              Umbral de Stock Mínimo
             </Text>
           </View>
         </Dialog.Title>
