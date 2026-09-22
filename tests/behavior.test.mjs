@@ -898,7 +898,9 @@ test("assistant parser only accepts named product queries and allowlisted read i
   const { interpretarHeuristica, VoiceInterpretationSchema } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
 
   const broadStockQuestion = interpretarHeuristica("¿Qué productos tienen stock disponible?");
-  assert.equal(broadStockQuestion.accion, "desconocida");
+  assert.equal(broadStockQuestion.accion, "listar_inventario");
+  assert.equal(broadStockQuestion.consulta?.min_stock, 1);
+  assert.equal(broadStockQuestion.consulta?.producto, null);
   assert.deepEqual(broadStockQuestion.productos, []);
 
   const productSearch = interpretarHeuristica("Buscá producto Jean Mom Fit");
@@ -910,6 +912,57 @@ test("assistant parser only accepts named product queries and allowlisted read i
   assert.equal(lowStock.consulta?.sucursal, "central");
 
   assert.equal(VoiceInterpretationSchema.safeParse({ accion: "eliminar_productos", productos: [] }).success, false);
+  assert.equal(VoiceInterpretationSchema.safeParse({
+    accion: "listar_inventario",
+    productos: [],
+    consulta: { producto: "jean", min_stock: 10 },
+  }).success, false);
+});
+
+test("assistant heuristic parses inventory listing with a stock threshold instead of a product search", () => {
+  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+
+  const threshold = interpretarHeuristica("dime mis productos disponibles mayor a 10 unidades");
+  assert.equal(threshold.accion, "listar_inventario");
+  assert.equal(threshold.consulta?.min_stock, 10);
+  assert.equal(threshold.consulta?.producto, null);
+
+  const listAll = interpretarHeuristica("¿Qué productos tenemos en el catálogo?");
+  assert.equal(listAll.accion, "listar_inventario");
+  assert.equal(listAll.consulta?.min_stock, null);
+
+  const stockQuery = interpretarHeuristica("¿cuánto stock queda de Jean Mom Fit?");
+  assert.equal(stockQuery.accion, "consulta_stock");
+  assert.equal(stockQuery.consulta?.producto?.toLowerCase(), "jean mom fit");
+});
+
+test("voice inventory listing dispatch filters by threshold through the read API", async () => {
+  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const listCalls = [];
+  const readApi = {
+    findProductByCode: async () => { throw new Error("not used"); },
+    searchProducts: async () => [],
+    stockForProduct: async () => [],
+    getBranches: async () => [{ id: 1, nombre: "Central" }],
+    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
+    getLowStock: async () => [],
+    getStockList: async (branchId) => {
+      listCalls.push(branchId);
+      return [
+        { productoId: 1, nombre: "Jean Mom Fit", codigo: "JEA-001", cantidad: 12 },
+        { productoId: 2, nombre: "Chompa Roja", codigo: "CHO-002", cantidad: 4 },
+        { productoId: 3, nombre: "Vestido Gala", codigo: "VES-003", cantidad: 25 },
+      ];
+    },
+  };
+
+  const result = await interpretarVoz("dime mis productos disponibles mayor a 10 unidades", undefined, readApi);
+
+  assert.equal(result.tipo, "listar_inventario");
+  assert.equal(result.minStock, 10);
+  assert.deepEqual(result.productos.map((item) => item.productoId), [3, 1]);
+  assert.equal(result.lineas.length, 0);
+  assert.deepEqual(listCalls, [undefined]);
 });
 
 test("AI gateway rejects malformed model JSON instead of throwing or accepting it", () => {

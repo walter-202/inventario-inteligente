@@ -46,7 +46,7 @@ import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
 import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
 
 const RETRY_HINT = "Corregí el texto abajo y enviá de nuevo.";
-const SUGERENCIA_SKU = 'Probá con el código SKU (ej: JEAN-001) o "Vender 2 Jean Mom Fit".';
+const SUGERENCIA_SKU = "Usá el nombre exacto del producto o su código SKU.";
 
 type LineaConStock = LineaInterpretada & { available: number };
 
@@ -439,6 +439,32 @@ export function VoiceCommandView() {
         dispatch({ type: "fijar-resumen", sessionId, resumen: `Stock bajo: ${result.productos.length} producto(s)`, updatedAt: ahora() });
         return;
       }
+      if (result.tipo === "listar_inventario") {
+        fijarObjetivo(sessionId, "consulta");
+        agregar(sessionId, {
+          role: "asistente",
+          tone: result.productos.length > 0 ? "success" : "info",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: {
+            kind: "lista-inventario",
+            minStock: result.minStock,
+            filas: result.productos.map((item) => ({
+              nombre: item.nombre,
+              codigo: item.codigo,
+              cantidad: item.cantidad,
+            })),
+          },
+        });
+        dispatch({
+          type: "fijar-resumen",
+          sessionId,
+          resumen: `Inventario: ${result.productos.length} producto(s)`,
+          updatedAt: ahora(),
+        });
+        return;
+      }
       if (result.tipo === "consulta_stock" || result.tipo === "consulta_ventas") {
         fijarObjetivo(sessionId, "consulta");
         if (result.tipo === "consulta_stock") {
@@ -798,44 +824,45 @@ export function VoiceCommandView() {
                 <TouchableOpacity
                   style={styles.featureCard}
                   activeOpacity={0.7}
-                  onPress={() => voice.setTranscript("Vender 2 Jean Mom Fit")}
+                  onPress={() => voice.setTranscript("Vender 2 <producto>")}
                 >
                   <Text style={styles.featureCardEmoji}>🛍️</Text>
                   <Text variant="labelMedium" style={styles.featureCardTitle}>Vender prendas</Text>
-                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Vender 2 Jean Mom Fit"</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>{"\"Vender 2 <producto>\""}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.featureCard}
                   activeOpacity={0.7}
-                  onPress={() => voice.setTranscript("¿Cuánto stock queda de Jean Mom Fit?")}
+                  onPress={() => voice.setTranscript("¿Cuánto stock queda de <producto>?")}
                 >
                   <Text style={styles.featureCardEmoji}>📦</Text>
                   <Text variant="labelMedium" style={styles.featureCardTitle}>Consultar stock</Text>
-                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Stock en sucursales"</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>{"\"Stock de <producto>\""}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.featureCard}
                   activeOpacity={0.7}
-                  onPress={() => voice.setTranscript("Registrar Blusa Seda SKU BLU-10 Bs 120 stock 15")}
+                  onPress={() => voice.setTranscript("Registrar un producto nuevo")}
                 >
                   <Text style={styles.featureCardEmoji}>👗</Text>
                   <Text variant="labelMedium" style={styles.featureCardTitle}>Alta de prenda</Text>
-                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Registrar nuevo producto"</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Registrar un producto nuevo"</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.featureCard}
                   activeOpacity={0.7}
-                  onPress={() => voice.setTranscript("¿Cuánto se vendió hoy en Central?")}
+                  onPress={() => voice.setTranscript("¿Cuánto se vendió hoy?")}
                 >
                   <Text style={styles.featureCardEmoji}>📊</Text>
                   <Text variant="labelMedium" style={styles.featureCardTitle}>Ventas del día</Text>
-                  <Text variant="bodySmall" style={styles.featureCardDesc}>"Resumen de hoy"</Text>
+                  <Text variant="bodySmall" style={styles.featureCardDesc}>"¿Cuánto se vendió hoy?"</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ) : (
             visibleMessages.map((message) => {
               const candidatos = message.attachment?.kind === "candidatos" ? message.attachment : null;
+              const listaInventario = message.attachment?.kind === "lista-inventario" ? message.attachment : null;
               return (
               <ChatMessageBubble
                 key={message.id}
@@ -923,6 +950,26 @@ export function VoiceCommandView() {
                         <Text variant="labelMedium" style={styles.lowStockQty}>{item.cantidad} uds</Text>
                       </View>
                     ))}
+                  </View>
+                ) : null}
+                {listaInventario ? (
+                  <View style={styles.queryCard}>
+                    {listaInventario.filas.slice(0, 8).map((fila) => (
+                      <View key={`${fila.codigo}-${fila.nombre}`} style={styles.queryRow}>
+                        <View style={styles.queryCopy}>
+                          <Text variant="bodySmall" style={styles.queryBranch}>{fila.nombre}</Text>
+                          <Text variant="labelSmall" style={styles.queryMeta}>
+                            {fila.codigo}{listaInventario.minStock > 0 ? ` · desde ${listaInventario.minStock} uds` : ""}
+                          </Text>
+                        </View>
+                        <Text variant="labelMedium" style={styles.queryQty}>{fila.cantidad} uds</Text>
+                      </View>
+                    ))}
+                    {listaInventario.filas.length > 8 ? (
+                      <Text variant="labelSmall" style={styles.queryMeta}>
+                        +{listaInventario.filas.length - 8} producto(s) más
+                      </Text>
+                    ) : null}
                   </View>
                 ) : null}
               </ChatMessageBubble>

@@ -33,7 +33,8 @@ export type ChatAttachment =
   | { kind: "consulta-stock"; productoNombre: string; filas: StockRow[]; total: number }
   | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number }
   | { kind: "busqueda-productos"; consulta: string; productos: Producto[] }
-  | { kind: "stock-bajo"; productos: DashboardLowStockItem[] };
+  | { kind: "stock-bajo"; productos: DashboardLowStockItem[] }
+  | { kind: "lista-inventario"; minStock: number; filas: Array<{ nombre: string; codigo: string; cantidad: number }> };
 
 export interface ChatMessage {
   id: string;

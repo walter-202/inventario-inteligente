@@ -13,7 +13,7 @@ import {
   esConsultaProductoEspecifica,
   type ProductoInterpretado,
 } from "./aiInterpretationService";
-import { obtenerStockDeProducto } from "../../inventario/api/inventarioApi";
+import { obtenerStockDeProducto, obtenerInventario, obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
 import { obtenerDashboardMetrics, obtenerVentasDeHoy } from "../../dashboard/api/dashboardApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
 
@@ -46,6 +46,14 @@ export interface StockSucursalDetalle {
   cantidad: number;
 }
 
+export interface StockListItem {
+  productoId: number;
+  nombre: string;
+  codigo: string;
+  categoria?: string;
+  cantidad: number;
+}
+
 export interface AssistantReadApi {
   findProductByCode(codigo: string): Promise<Producto>;
   searchProducts(query: string, limit: number): Promise<Producto[]>;
@@ -53,6 +61,29 @@ export interface AssistantReadApi {
   getBranches(): Promise<Sucursal[]>;
   getTodaySales(sucursalId?: number): Promise<Pick<DashboardMetrics, "totalSales" | "salesCount">>;
   getLowStock(sucursalId?: number): Promise<DashboardLowStockItem[]>;
+  getStockList(sucursalId?: number): Promise<StockListItem[]>;
+}
+
+async function construirStockList(sucursalId?: number): Promise<StockListItem[]> {
+  const items = sucursalId === undefined
+    ? await obtenerStockMultiSucursal()
+    : await obtenerInventario(sucursalId);
+  const agregados = new Map<number, StockListItem>();
+  for (const item of items) {
+    const actual = agregados.get(item.producto_id);
+    if (actual) {
+      actual.cantidad += item.cantidad;
+    } else {
+      agregados.set(item.producto_id, {
+        productoId: item.producto_id,
+        nombre: item.producto.nombre,
+        codigo: item.producto.codigo,
+        categoria: item.producto.categoria,
+        cantidad: item.cantidad,
+      });
+    }
+  }
+  return Array.from(agregados.values());
 }
 
 const defaultAssistantReadApi: AssistantReadApi = {
@@ -62,6 +93,7 @@ const defaultAssistantReadApi: AssistantReadApi = {
   getBranches: obtenerSucursales,
   getTodaySales: obtenerVentasDeHoy,
   getLowStock: async (sucursalId) => (await obtenerDashboardMetrics(sucursalId)).lowStock,
+  getStockList: construirStockList,
 };
 
 export type ResultadoInterpretacion =
@@ -100,6 +132,16 @@ export type ResultadoInterpretacion =
       tipo: "consulta_bajo_stock";
       filtroSucursal?: string;
       productos: DashboardLowStockItem[];
+      lineas: [];
+      fueCorreccion?: false;
+      mensaje: string;
+      pasosPensamiento?: string[];
+    }
+  | {
+      tipo: "listar_inventario";
+      filtroSucursal?: string;
+      minStock: number;
+      productos: StockListItem[];
       lineas: [];
       fueCorreccion?: false;
       mensaje: string;
@@ -404,6 +446,50 @@ export async function interpretarVoz(
     };
   }
 
+  // 3b. Broad inventory listing with optional stock threshold
+  if (response.accion === "listar_inventario") {
+    const sucursal = await resolverSucursalSolicitada(response.consulta?.sucursal, readApi, contexto?.authorization?.allowedBranchIds);
+    if (sucursal.kind === "desconocida") {
+      return {
+        tipo: "aclaracion",
+        mensaje: `No reconozco la sucursal "${sucursal.solicitada}". Indicá una sucursal registrada para aplicar el filtro.`,
+        pasosPensamiento: ["Filtro de sucursal no reconocido", "Listado de inventario no ejecutado"],
+      };
+    }
+    const branchId = sucursal.kind === "resuelta"
+      ? sucursal.sucursal.id
+      : contexto?.authorization?.activeBranchId ?? undefined;
+    const filtroSucursal = sucursal.kind === "resuelta" ? sucursal.sucursal.nombre : undefined;
+    const minStock = response.consulta?.min_stock ?? 0;
+    const todas = await readApi.getStockList(branchId);
+    const productos = todas
+      .filter((item) => item.cantidad >= minStock)
+      .sort((left, right) => right.cantidad - left.cantidad || left.nombre.localeCompare(right.nombre));
+    const umbralTexto = minStock > 0 ? ` con ${minStock}+ unidades` : "";
+    const ambito = filtroSucursal
+      ? `en ${filtroSucursal}`
+      : branchId !== undefined
+        ? "en la sucursal activa"
+        : "en todas las sucursales";
+    const mensaje = productos.length
+      ? `Encontré ${productos.length} producto${productos.length === 1 ? "" : "s"}${umbralTexto} ${ambito}.`
+      : `No hay productos${umbralTexto} ${ambito}.`;
+    return {
+      tipo: "listar_inventario",
+      filtroSucursal,
+      minStock,
+      productos,
+      lineas: [],
+      mensaje,
+      pasosPensamiento: [
+        "Intención identificada: listado de inventario",
+        `Umbral de stock mínimo: ${minStock} unidades`,
+        `Filtro de sucursal: ${filtroSucursal ?? (branchId !== undefined ? "sucursal activa" : "todas las sucursales")}`,
+        `${productos.length} producto(s) coincidente(s)`,
+      ],
+    };
+  }
+
   // 4. Today's sales inquiry
   if (response.accion === "consulta_ventas") {
     const sucursal = await resolverSucursalSolicitada(response.consulta?.sucursal, readApi, contexto?.authorization?.allowedBranchIds);
@@ -477,7 +563,7 @@ export async function interpretarVoz(
       if (!nombreLimpio) {
         return {
           tipo: "aclaracion",
-          mensaje: `Entendí la cantidad (${item.cantidad}) pero no el producto. Escribí el nombre o el código SKU, por ejemplo "Vender ${item.cantidad} Jean Mom Fit".`,
+          mensaje: `Entendí la cantidad (${item.cantidad}) pero no el producto. Escribí el nombre o el código SKU del producto para continuar.`,
           pasosPensamiento: [`Cantidad identificada (${item.cantidad}) pero falta nombre del producto`],
         };
       }

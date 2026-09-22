@@ -24,11 +24,11 @@ interface ChatComposerProps {
 }
 
 const SUGERENCIAS = [
-  "Vender 2 Jean Mom Fit",
-  "Registrar Blusa Seda SKU BLU-10 Bs 120 stock 15",
-  "¿Cuánto stock queda de Jean Mom Fit?",
-  "¿Cuánto se vendió hoy en Central?",
-  "Sino, corrige a 5 unidades",
+  "¿Cuánto se vendió hoy?",
+  "¿Qué productos tienen stock bajo?",
+  "Registrar un producto nuevo",
+  "Vender 2 <producto>",
+  "¿Qué podés hacer?",
 ];
 
 /**
