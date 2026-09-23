@@ -1,4 +1,4 @@
-import { generateText, isStepCount, streamText, tool, type ModelMessage } from "ai";
+import { isStepCount, streamText, tool, type ModelMessage } from "ai";
 import type { AssistantScopeContext } from "../lib/assistantAuthorization";
 import {
   ASSISTANT_CONFIG_MESSAGE,
@@ -168,8 +168,7 @@ export function assistantUserFacingError(error: unknown): string {
 }
 
 const STREAM_TIMEOUT_MS = 20_000;
-const GENERATE_TIMEOUT_MS = 45_000;
-const TURN_STEP_LIMIT = 8;
+const TURN_STEP_LIMIT = 4;
 
 function startTimeout(ms: number): { controller: AbortController; cancel: () => void } {
   const controller = new AbortController();
@@ -219,7 +218,7 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
     const steps = await awaitMaybe(result.steps, []);
     await awaitMaybe(result.finishReason, undefined);
     const outputs = toolOutputsFromResult({ toolResults, steps });
-    // Partial streamed copy without tools is not a finished turn: fall back to generateText.
+    // Do not replay a partial or failed request through a second generation call.
     if (outputs.length === 0 && (streamFailed || input.abortSignal.aborted || !hasUsableTurn(text, outputs))) {
       return null;
     }
@@ -230,23 +229,6 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
   } catch {
     return null;
   }
-}
-
-async function completeTurnWithGenerate(input: TurnCallInput): Promise<ResultadoInterpretacion> {
-  const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
-  input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Generando respuesta. Sigue trabajando…"] });
-  const result = await generateText({
-    model: input.resolved.model,
-    instructions: input.instructions,
-    messages: input.messages,
-    tools: input.tools,
-    stopWhen: isStepCount(TURN_STEP_LIMIT),
-    abortSignal: input.abortSignal,
-    maxRetries: 1,
-  });
-  const outputs = toolOutputsFromResult(result);
-  const thoughts = thoughtsFromResult(`${label} · generateText`, outputs);
-  return mapToolOutputsToResult(outputs, result.text, thoughts);
 }
 
 export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<ResultadoInterpretacion> {
@@ -320,15 +302,6 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
       lastError = streamError;
     } finally {
       streamAttempt.cancel();
-    }
-
-    const generateAttempt = startTimeout(GENERATE_TIMEOUT_MS);
-    try {
-      return await completeTurnWithGenerate({ ...callBase, abortSignal: generateAttempt.controller.signal });
-    } catch (error) {
-      lastError = error;
-    } finally {
-      generateAttempt.cancel();
     }
   }
 
