@@ -40,11 +40,11 @@ The user reported that switching tabs on web can return to `/` and that mobile r
 
 ## Progress
 
-- Status: implementation and three bounded corrections are complete; functional checks are recorded below; isolate and commit the final correction on `master`, then record the commit identity.
+- Status: complete on the existing primary branch; same-user revalidation, protected-content cover, authorization-scope cleanup, and stale callback/error guards are implemented.
 - TDD mode: strict, source: existing user-selected assistant-reliability project decision.
 - Test runner: `node --test tests/auth.test.mjs` (focused), `npm test`; type check: `npx tsc --noEmit`.
 - Branch: `master` (current primary branch).
-- Initial work-unit commit: `0dba6b7`; final callback/error safeguard commit pending.
+- Work-unit commits: `0dba6b7` (auth refresh/navigation fix) and `80ce42b` (stale sales callback/error safeguards).
 - Feature delivery strategy: `ask-on-risk`.
 - Forecast: approximately 180 authored changed lines; generated files excluded.
 
@@ -64,11 +64,13 @@ The user reported that switching tabs on web can return to `/` and that mobile r
 - Full suite: `npm test` passed 84/84.
 - Type check: `npx tsc --noEmit` remains blocked by workspace errors in `aiSdkProviders.ts`, `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; the auth/scope-epoch corrections were not reported as errors.
 - Targeted whitespace check: `git diff --check` passed on the work-unit paths.
+- Risk assessment: RDD is off (`decided by default`); native assessment classified this auth hot-path candidate as `high`. The independent read-only audit found and helped close the stale sale state/callback issues; no RDD review transaction was started while the user-owned switch is off.
+- Root trigger limitation: the exact event that causes a same-user revalidation on tab switch remains unproven; the fix preserves navigation and covers content for every same-user revalidation rather than suppressing session checks.
 - No interactive web or mobile visual test was run.
 
 ## Next Step
 
-Perform the read-only native risk assessment, isolate only the final correction and this task document from unrelated changes, commit on `master`, then update this document and its Engram mirror with the resulting commit identity.
+Optional next step: reproduce tab switching on web and a mobile device to visually confirm the cover and route retention in the running app.
 
 ## Relevant Files
 
