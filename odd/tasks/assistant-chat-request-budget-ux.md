@@ -27,9 +27,9 @@ The user requested an audit and correction after observing unusually high free-t
 - Strict TDD applies, based on the user's prior explicit assistant-reliability decision: RED -> GREEN -> REFACTOR.
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Keep mobile changes on the current primary branch (`master`) per the user's saved instruction; do not push or open a PR.
-- Preserve all pre-existing and concurrent working-tree changes. In particular, do not edit or stage `.atl/.skill-registry.cache.json`, `.atl/skill-registry.md`, `app.json`, `scripts/seed_lidemoda.sql`, `src/features/ajustes/screens/AISettingsScreen.tsx`, `src/features/asistente-ia/lib/aiGateway.ts`, `src/features/asistente-ia/lib/aiProviders.ts`, `src/features/auth/hooks/useAuth.tsx`, `src/features/auth/lib/authBoundary.ts`, `src/shared/lib/secureKeyStore.ts`, `tests/behavior.test.mjs`, `scripts/vault_ai_credentials_sync.sql`, or `src/features/asistente-ia/lib/aiVaultSync.ts`. The current dirty `tests/behavior.test.mjs` diff now removes the stale assertion requiring the deleted fallback; preserve that user-owned hunk verbatim and keep the entire file unstaged.
+- Preserve all pre-existing and concurrent working-tree changes. In particular, do not edit or revert `.atl/.skill-registry.cache.json`, `.atl/skill-registry.md`, `app.json`, `scripts/seed_lidemoda.sql`, `src/features/ajustes/screens/AISettingsScreen.tsx`, `src/features/asistente-ia/lib/aiGateway.ts`, `src/features/asistente-ia/lib/aiProviders.ts`, `src/features/auth/hooks/useAuth.tsx`, `src/features/auth/lib/authBoundary.ts`, `src/shared/lib/secureKeyStore.ts`, `tests/behavior.test.mjs`, `scripts/vault_ai_credentials_sync.sql`, or `src/features/asistente-ia/lib/aiVaultSync.ts` as part of ACU work. These paths contained concurrent changes during implementation; a later broader commit `9c86d81` records them. The initial user-owned test hunk removing the obsolete fallback assertion is now committed; do not rewrite or revert it.
 - No remote Ollama/Supabase access, secret inspection, or provider usage-dashboard access.
-- Delivery strategy: `ask-on-risk`; forecast is approximately 250 authored changed lines (additions plus deletions), below the 400-line planning threshold.
+- Delivery strategy was initially recorded as `ask-on-risk`; the user requires remaining on `master`, with no push or PR. The original authored-line forecast was approximate and excluded later concurrent changes.
 
 ## Tasks
 
@@ -72,14 +72,16 @@ The user requested an audit and correction after observing unusually high free-t
 - `git diff --check` reports a pre-existing trailing blank line in the protected, modified `scripts/seed_lidemoda.sql`; no ACU-001 file is named in the output.
 - The focused request-budget test is included in `npm test`; no remote calls, credentials, or provider usage checks were made.
 - ACU-002 strict TDD RED: the offline cancellation test showed an aborted primary-provider stream still invoked the fallback provider; lifecycle tests also failed before the request gate/retry classification existed. GREEN: `node --test tests/assistant-chat-lifecycle.test.mjs` passes 5/5, covering cancellation without failover, synchronous duplicate rejection, session-scoped cancellation, retry identity, retryable provider/configuration failures, and the shared button/keyboard/retry wiring.
-- ACU-002 `npm test` passes 76/76; the focused lifecycle suite is run explicitly and is not wired into this script.
+- ACU-002 `npm test` passed 76/76 at its implementation point; the focused lifecycle suite is run explicitly and is not wired into this script. After the broader `9c86d81` commit, the writer reran the current suite at 81/81.
 - ACU-002 `npx tsc --noEmit` remains blocked only by unrelated dirty/untracked `aiSdkProviders.ts`, `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; no ACU-002 file appears in the errors.
-- ACU-002 `git diff --check` reports only the pre-existing blank line at protected `scripts/seed_lidemoda.sql:356`.
+- Before the broader `9c86d81` commit, `git diff --check` reported only the pre-existing blank line at `scripts/seed_lidemoda.sql:356`; the writer later confirmed `git diff --check` passes on the clean current tree.
 - The AI SDK's installed local docs and source confirm `streamText` accepts `abortSignal`; the local provider fetch wrapper forwards its `init` unchanged, so the signal reaches the SDK fetch. No mobile/native runtime or real provider was invoked; the offline mocked harness verified one model invocation on cancellation.
+- Parent spot-check after ACU-002: `node --test tests/assistant-chat-lifecycle.test.mjs` passes 5/5. Native assessment of the current committed delta returned `medium`; receipt-driven review remains off by default.
+- ACU-002 lifecycle UI/helper/tests are in `a82a120`; its AI SDK abort/failover integration in `assistantAgent.ts` and `voiceCommandApi.ts` is present in the later broad `9c86d81`, not `a82a120`. The integrated current tree passes the lifecycle suite, but those commits are not a standalone ACU-002-only sequence.
 
 ## Next Step
 
-ACU-001 and ACU-002 are complete on `master`; preserve the user-owned changes and do not start ACU-003 until separately authorized. The next work unit is the provider-picker/progress UX slice.
+ACU-001 and ACU-002 are complete on `master`. ACU-003 remains the recommended next UX slice: expose configured Ollama/Mistral choices and make provider/attempt/request-count state visible. No source changes for ACU-003 were made in this pass.
 
 ## Relevant Files
 
