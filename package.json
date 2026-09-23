@@ -56,7 +56,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "node --test tests/architecture.test.mjs tests/contracts.test.mjs tests/behavior.test.mjs tests/auth.test.mjs tests/assistant-request-budget.test.mjs",
+    "test": "node --test tests/architecture.test.mjs tests/contracts.test.mjs tests/behavior.test.mjs tests/auth.test.mjs tests/assistant-request-budget.test.mjs tests/assistant-chat-lifecycle.test.mjs",
     "test:spike": "node --test tests/ai-sdk-spike.test.mjs",
     "smoke:live": "node scripts/supabase-live-read-smoke.mjs",
     "build:apk": "eas build -p android --profile preview",

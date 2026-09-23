@@ -48,7 +48,7 @@ The user requested an audit and correction after observing unusually high free-t
 
 ## Progress
 
-- Status: ACU-001 request cap and timeout-specific error reporting implemented; ACU-002 and ACU-003 remain planned.
+- Status: ACU-001 request cap and timeout-specific error reporting implemented and committed as `e500349` and `ddc2bc1`; ACU-002 and ACU-003 remain planned.
 - TDD mode: strict, user-selected for assistant reliability.
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Branch: `master` (current primary branch).
@@ -63,9 +63,10 @@ The user requested an audit and correction after observing unusually high free-t
 - Strict TDD RED: the new offline request-budget tests failed because a stream error invoked both `streamText` and `generateText`, and because the tool-step cap was 8 instead of the expected 4.
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 3 tests; a failed stream makes no same-provider `generateText` call, the retained stream path uses `maxRetries: 0` and a 4-step cap, and Auto failover makes at most one stream attempt per configured provider.
 - Earlier writer verification ran 69 tests and passed 68 because the then-current dirty `tests/behavior.test.mjs` asserted that `generateText()` and `GENERATE_TIMEOUT_MS` remain after ACU-001 removed that fallback. A concurrent user-owned diff later removed the obsolete assertion; this task preserved that file untouched and unstaged.
-- Independent verification confirmed the focused tests count mocked AI SDK calls, but found that swallowed stream errors leave `lastError` unset, so exhausted providers lose the specific timeout message. This is the remaining ACU-001 user-facing regression to correct.
+- Independent verification confirmed the focused tests count mocked AI SDK calls, but initially found that swallowed stream errors left `lastError` unset, so exhausted providers lost the specific timeout message.
 - Strict TDD follow-up RED: the new simulated-abort test immediately fired the internal 20-second timeout callback and failed because the final message was generic provider error instead of timeout-specific.
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 4 tests, including an in-flight abort simulation that completes in under a second and verifies timeout-specific messaging without any generateText replay.
+- Parent spot-check after `ddc2bc1`: the focused request-budget suite passes 4/4; native risk assessment for the committed work returned `medium`, and receipt-driven review is off by default.
 - Current `npm test` passes all 70 tests, including the concurrent user-owned `tests/behavior.test.mjs` changes; that file remains untouched and unstaged by this work.
 - `npx tsc --noEmit` is blocked by unrelated workspace errors in `aiSdkProviders.ts`, the pre-existing untracked `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`.
 - `git diff --check` reports a pre-existing trailing blank line in the protected, modified `scripts/seed_lidemoda.sql`; no ACU-001 file is named in the output.

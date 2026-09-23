@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, HelperText, IconButton, Text, TextInput } from "react-native-paper";
-import { AudioLines, Mic, ScanBarcode, Send, Square } from "lucide-react-native";
+import { AudioLines, Mic, RotateCcw, ScanBarcode, Send, Square } from "lucide-react-native";
 import { SuggestionChips } from "./SuggestionChips";
 import { CameraScanModal } from "../../../shared/components/CameraScanModal";
 import { colors, spacing } from "../../../shared/theme";
@@ -17,6 +17,8 @@ interface ChatComposerProps {
   onStart: () => void;
   onStop: () => void;
   onSend: () => void;
+  onRetry?: () => void;
+  retryAvailable?: boolean;
   onVoiceMode: () => void;
   onRequestPermission?: () => void;
   onScanCode?: (code: string) => void;
@@ -47,6 +49,8 @@ export function ChatComposer({
   onStart,
   onStop,
   onSend,
+  onRetry,
+  retryAvailable = false,
   onVoiceMode,
   onRequestPermission,
   onScanCode,
@@ -107,6 +111,20 @@ export function ChatComposer({
           accessibilityLabel="Enviar mensaje"
         />
       </View>
+      {retryAvailable && onRetry ? (
+        <View style={styles.retryRow}>
+          <Button
+            compact
+            mode="contained-tonal"
+            icon={({ color, size }) => <RotateCcw size={size} color={color} />}
+            onPress={onRetry}
+            disabled={interpreting}
+            accessibilityLabel="Reintentar mensaje anterior"
+          >
+            Reintentar mensaje anterior
+          </Button>
+        </View>
+      ) : null}
       <HelperText type="info" visible={interpreting}>
         El asistente sigue trabajando. Esperá a que termine esta consulta.
       </HelperText>
@@ -140,6 +158,7 @@ const styles = StyleSheet.create({
   },
   permissionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.xs },
   permissionText: { flex: 1, color: colors.textSecondary },
+  retryRow: { alignItems: "flex-end", paddingHorizontal: spacing.xs },
   row: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
   input: { flex: 1, backgroundColor: colors.surface, maxHeight: 110 },
 });

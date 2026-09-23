@@ -32,7 +32,12 @@ import {
   type LineaInterpretada,
   type ResultadoInterpretacion,
 } from "../api/voiceCommandApi";
-import { assistantUserFacingError, runAssistantTurn, scannedBarcodeMessage } from "../api/assistantAgent";
+import { assistantUserFacingError, isRetryableAssistantResult, runAssistantTurn, scannedBarcodeMessage } from "../api/assistantAgent";
+import {
+  AssistantChatRequestLifecycle,
+  isAssistantFailedDraftRetry,
+  type AssistantFailedDraft,
+} from "../lib/assistantChatRequestLifecycle";
 import type { Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 import { ChatMessageBubble } from "../components/ChatMessageBubble";
@@ -55,6 +60,11 @@ type LineaConStock = LineaInterpretada & { available: number };
  */
 export function VoiceCommandView() {
   const voice = useVoiceCommand();
+  const requestLifecycleRef = useRef(new AssistantChatRequestLifecycle());
+  const transcriptRef = useRef(voice.transcript);
+  transcriptRef.current = voice.transcript;
+  const [streamDraft, setStreamDraft] = useState<{ text: string; thoughts: string[] } | null>(null);
+  const [failedDraft, setFailedDraft] = useState<AssistantFailedDraft | null>(null);
   const { profile } = useAuth();
   const branches = useSucursales();
   const stock = useStockMultiSucursal();
@@ -71,6 +81,10 @@ export function VoiceCommandView() {
   useFocusEffect(
     useCallback(() => {
       cargarModo();
+      return () => {
+        requestLifecycleRef.current.cancel();
+        setStreamDraft(null);
+      };
     }, [cargarModo]),
   );
   const cambiarModo = (next: PreferredMode) => {
@@ -88,7 +102,6 @@ export function VoiceCommandView() {
   const [shortage, setShortage] = useState<{ messageId: string; lines: LineaConStock[] } | null>(null);
   const [papelera, setPapelera] = useState<{ session: ChatSession; messages: ChatMessage[] } | null>(null);
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
-  const [streamDraft, setStreamDraft] = useState<{ text: string; thoughts: string[] } | null>(null);
   const idRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const persistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -119,11 +132,20 @@ export function VoiceCommandView() {
     hydratedUserRef.current = null;
     dispatch({ type: "reemplazar-estado", state: emptyAssistantChat() });
     setInspectingId(null);
+    setFailedDraft(null);
+    transcriptRef.current = "";
+    voice.setTranscript("");
+    setStreamDraft(null);
     setPendingConfirmation(null);
     setPendingRegistration(null);
     setShortage(null);
     setLastLines([]);
-    if (!userId) return () => { cancelled = true; };
+    if (!userId) {
+      return () => {
+        cancelled = true;
+        requestLifecycleRef.current.cancel();
+      };
+    }
 
     void enqueuePersistence(async () => {
       const restored = await hydrateAssistantChat(AsyncStorage, userId);
@@ -131,7 +153,10 @@ export function VoiceCommandView() {
       hydratedUserRef.current = userId;
       dispatch({ type: "reemplazar-estado", state: restored });
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      requestLifecycleRef.current.cancel();
+    };
   }, [enqueuePersistence, userId]);
 
   useEffect(() => {
@@ -341,36 +366,61 @@ export function VoiceCommandView() {
   const enviar = async (textoForzado?: string) => {
     const texto = (textoForzado ?? voice.transcript).trim();
     if (!texto || voice.interpreting || sale.isPending) return;
+    const request = requestLifecycleRef.current.begin(asegurarSesion);
+    if (!request) return;
+    const sessionId = request.sessionId;
+    const retryDraft = isAssistantFailedDraftRetry(failedDraft, sessionId, texto) ? failedDraft : null;
     if (voice.recording) voice.stop();
     setInspectingId(null);
-    const sessionId = asegurarSesion();
-    agregar(sessionId, { role: "usuario", texto });
-    voice.setTranscript("");
+    if (!retryDraft) {
+      setFailedDraft(null);
+      agregar(sessionId, { role: "usuario", texto });
+    }
     setPendingConfirmation(null);
     setPendingRegistration(null);
     setShortage(null);
     const startTime = Date.now();
+    const activeMessages = chat.messages[sessionId] ?? [];
+    const historial = retryDraft?.history ?? activeMessages.map((m) => ({
+      role: m.role,
+      texto: m.texto,
+    }));
     if (!assistantScope) {
       agregar(sessionId, { role: "asistente", tone: "error", texto: "Sin sucursal habilitada para usar el asistente." });
+      requestLifecycleRef.current.finish(request);
       return;
     }
     try {
-      const activeMessages = chat.messages[sessionId] ?? [];
-      const historial = activeMessages.map((m) => ({
-        role: m.role,
-        texto: m.texto,
-      }));
-
       setStreamDraft({ text: "", thoughts: ["Consultando al proveedor…"] });
       const result: ResultadoInterpretacion = await voice.withInterpreting(() =>
         runAssistantTurn({
           text: texto,
           history: historial,
           scope: assistantScope,
-          onProgress: (progress) => setStreamDraft(progress),
+          abortSignal: request.signal,
+          onProgress: (progress) => {
+            if (requestLifecycleRef.current.isCurrent(request)) setStreamDraft(progress);
+          },
         }),
       );
+      if (!requestLifecycleRef.current.isCurrent(request)) return;
       const durationMs = Date.now() - startTime;
+      if (result.tipo === "aclaracion" && isRetryableAssistantResult(result)) {
+        setFailedDraft({ sessionId, text: texto, history: historial });
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "error",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+        });
+        return;
+      }
+      setFailedDraft(null);
+      if (transcriptRef.current.trim() === texto) {
+        transcriptRef.current = "";
+        voice.setTranscript("");
+      }
       if (result.tipo === "aclaracion") {
         agregar(sessionId, {
           role: "asistente",
@@ -389,7 +439,6 @@ export function VoiceCommandView() {
           thoughts: result.pasosPensamiento,
           durationMs,
         });
-        voice.setTranscript("");
         return;
       }
       if (result.tipo === "registro_producto") {
@@ -412,7 +461,6 @@ export function VoiceCommandView() {
             branchName,
           },
         });
-        voice.setTranscript("");
         return;
       }
       if (result.tipo === "buscar_producto") {
@@ -501,7 +549,6 @@ export function VoiceCommandView() {
             updatedAt: ahora(),
           });
         }
-        voice.setTranscript("");
         return;
       }
       if (result.tipo === "desambiguacion") {
@@ -519,14 +566,17 @@ export function VoiceCommandView() {
       fijarObjetivo(sessionId, "venta");
       procesarLineasVenta(sessionId, result.lineas, result.fueCorreccion, result.pasosPensamiento, durationMs);
     } catch (error) {
+      if (!requestLifecycleRef.current.isCurrent(request)) return;
+      const message = assistantUserFacingError(error);
+      setFailedDraft({ sessionId, text: texto, history: historial });
       agregar(sessionId, {
         role: "asistente",
         tone: "error",
-        texto: assistantUserFacingError(error),
+        texto: message,
         durationMs: Date.now() - startTime,
       });
     } finally {
-      setStreamDraft(null);
+      if (requestLifecycleRef.current.finish(request)) setStreamDraft(null);
     }
   };
 
@@ -679,6 +729,11 @@ export function VoiceCommandView() {
   };
 
   const nuevaSesion = () => {
+    requestLifecycleRef.current.cancel();
+    setStreamDraft(null);
+    setFailedDraft(null);
+    transcriptRef.current = "";
+    voice.setTranscript("");
     setInspectingId(null);
     setPendingConfirmation(null);
     setPendingRegistration(null);
@@ -699,6 +754,13 @@ export function VoiceCommandView() {
     const session = chat.sessions.find((item) => item.id === sessionId);
     setDrawerOpen(false);
     if (!session) return;
+    if (sessionId !== chat.activeSessionId || session.estado === "completada") {
+      requestLifecycleRef.current.cancel();
+      setStreamDraft(null);
+      setFailedDraft(null);
+      transcriptRef.current = "";
+      voice.setTranscript("");
+    }
     if (session.estado === "completada") {
       setInspectingId(sessionId);
       return;
@@ -717,6 +779,13 @@ export function VoiceCommandView() {
     });
     if (!ok) return;
     setPapelera({ session, messages: chat.messages[sessionId] ?? [] });
+    if (chat.activeSessionId === sessionId) {
+      requestLifecycleRef.current.cancel(sessionId);
+      setStreamDraft(null);
+      setFailedDraft(null);
+      transcriptRef.current = "";
+      voice.setTranscript("");
+    }
     if (inspectingId === sessionId) setInspectingId(null);
     if (pendingConfirmation && chat.activeSessionId === sessionId) setPendingConfirmation(null);
     dispatch({ type: "eliminar-sesion", sessionId });
@@ -1002,11 +1071,18 @@ export function VoiceCommandView() {
             interpreting={voice.interpreting}
             permissionDenied={voice.isAvailable && voice.permission?.granted !== true}
             permissionError={voice.permissionError}
-            error={voice.error}
-            onTranscriptChange={voice.setTranscript}
+            error={failedDraft?.sessionId === chat.activeSessionId ? undefined : voice.error}
+            onTranscriptChange={(value) => {
+              transcriptRef.current = value;
+              voice.setTranscript(value);
+            }}
             onStart={voice.start}
             onStop={voice.stop}
             onSend={() => void enviar()}
+            onRetry={() => {
+              if (failedDraft?.sessionId === chat.activeSessionId) void enviar(failedDraft.text);
+            }}
+            retryAvailable={failedDraft?.sessionId === chat.activeSessionId}
             onScanCode={(code) => void enviar(scannedBarcodeMessage(code))}
             onVoiceMode={abrirModoVoz}
             onRequestPermission={voice.requestPermission}
