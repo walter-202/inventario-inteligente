@@ -27,16 +27,16 @@ The user requested an audit and correction after observing unusually high free-t
 - Strict TDD applies, based on the user's prior explicit assistant-reliability decision: RED -> GREEN -> REFACTOR.
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Keep mobile changes on the current primary branch (`master`) per the user's saved instruction; do not push or open a PR.
-- Preserve all pre-existing and concurrent working-tree changes. In particular, do not edit or stage `.atl/.skill-registry.cache.json`, `.atl/skill-registry.md`, `app.json`, `scripts/seed_lidemoda.sql`, `src/features/ajustes/screens/AISettingsScreen.tsx`, `src/features/asistente-ia/lib/aiProviders.ts`, `src/features/auth/hooks/useAuth.tsx`, `src/features/auth/lib/authBoundary.ts`, `src/shared/lib/secureKeyStore.ts`, `tests/behavior.test.mjs`, `scripts/vault_ai_credentials_sync.sql`, or `src/features/asistente-ia/lib/aiVaultSync.ts`.
+- Preserve all pre-existing and concurrent working-tree changes. In particular, do not edit or stage `.atl/.skill-registry.cache.json`, `.atl/skill-registry.md`, `app.json`, `scripts/seed_lidemoda.sql`, `src/features/ajustes/screens/AISettingsScreen.tsx`, `src/features/asistente-ia/lib/aiGateway.ts`, `src/features/asistente-ia/lib/aiProviders.ts`, `src/features/auth/hooks/useAuth.tsx`, `src/features/auth/lib/authBoundary.ts`, `src/shared/lib/secureKeyStore.ts`, `tests/behavior.test.mjs`, `scripts/vault_ai_credentials_sync.sql`, or `src/features/asistente-ia/lib/aiVaultSync.ts`. The current dirty `tests/behavior.test.mjs` diff now removes the stale assertion requiring the deleted fallback; preserve that user-owned hunk verbatim and keep the entire file unstaged.
 - No remote Ollama/Supabase access, secret inspection, or provider usage-dashboard access.
 - Delivery strategy: `ask-on-risk`; forecast is approximately 250 authored changed lines (additions plus deletions), below the 400-line planning threshold.
 
 ## Tasks
 
 - [x] ACU-001 — Bound AI SDK request amplification.
-  - Acceptance: a stream timeout/failure cannot silently trigger a second full generation to the same provider; tool loops have an explicit lower per-provider step cap; automatic SDK retries are disabled on the retained generation path; deterministic tests assert invocation/fallback behavior.
-  - Checks: focused request-count tests first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit`.
-  - Rollback boundary: `src/features/asistente-ia/api/assistantAgent.ts` and the focused request-policy test only.
+  - Acceptance: a stream timeout/failure cannot silently trigger a second full generation to the same provider; tool loops have an explicit lower per-provider step cap; automatic SDK retries are disabled on the retained generation path; timeout errors remain accurately classified; deterministic tests assert invocation/fallback behavior.
+  - Checks: focused request-count and timeout-error tests first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit` (blocked by unrelated concurrent workspace errors unless those clear).
+  - Rollback boundary: `src/features/asistente-ia/api/assistantAgent.ts`, the focused request-policy test, and `package.json` test wiring; do not include any `tests/behavior.test.mjs` hunk because it belongs to concurrent user work.
 - [ ] ACU-002 — Guard and cancel chat submissions.
   - Acceptance: synchronous duplicate sends are rejected across button/keyboard paths; leaving or changing the active chat aborts its request; failed requests retain the user's text and require an explicit retry action; cancellation does not trigger provider failover.
   - Checks: focused send-lock/cancel/draft tests first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit`.
@@ -48,7 +48,7 @@ The user requested an audit and correction after observing unusually high free-t
 
 ## Progress
 
-- Status: ACU-001 implemented; ACU-002 and ACU-003 remain planned.
+- Status: ACU-001 request cap and timeout-specific error reporting implemented; ACU-002 and ACU-003 remain planned.
 - TDD mode: strict, user-selected for assistant reliability.
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Branch: `master` (current primary branch).
@@ -62,14 +62,18 @@ The user requested an audit and correction after observing unusually high free-t
 - Expo SDK 57.0.0 versioned documentation was consulted before any source change.
 - Strict TDD RED: the new offline request-budget tests failed because a stream error invoked both `streamText` and `generateText`, and because the tool-step cap was 8 instead of the expected 4.
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 3 tests; a failed stream makes no same-provider `generateText` call, the retained stream path uses `maxRetries: 0` and a 4-step cap, and Auto failover makes at most one stream attempt per configured provider.
-- `npm test` runs 69 tests and passes 68; the pre-existing dirty `tests/behavior.test.mjs:1332` fails because it asserts that `generateText()` and `GENERATE_TIMEOUT_MS` remain in the implementation, which conflicts with ACU-001's removal of that fallback. This file is explicitly protected from editing.
+- Earlier writer verification ran 69 tests and passed 68 because the then-current dirty `tests/behavior.test.mjs` asserted that `generateText()` and `GENERATE_TIMEOUT_MS` remain after ACU-001 removed that fallback. A concurrent user-owned diff later removed the obsolete assertion; this task preserved that file untouched and unstaged.
+- Independent verification confirmed the focused tests count mocked AI SDK calls, but found that swallowed stream errors leave `lastError` unset, so exhausted providers lose the specific timeout message. This is the remaining ACU-001 user-facing regression to correct.
+- Strict TDD follow-up RED: the new simulated-abort test immediately fired the internal 20-second timeout callback and failed because the final message was generic provider error instead of timeout-specific.
+- GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 4 tests, including an in-flight abort simulation that completes in under a second and verifies timeout-specific messaging without any generateText replay.
+- Current `npm test` passes all 70 tests, including the concurrent user-owned `tests/behavior.test.mjs` changes; that file remains untouched and unstaged by this work.
 - `npx tsc --noEmit` is blocked by unrelated workspace errors in `aiSdkProviders.ts`, the pre-existing untracked `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`.
 - `git diff --check` reports a pre-existing trailing blank line in the protected, modified `scripts/seed_lidemoda.sql`; no ACU-001 file is named in the output.
 - The focused request-budget test is included in `npm test`; no remote calls, credentials, or provider usage checks were made.
 
 ## Next Step
 
-Commit only ACU-001's source, focused test, package test wiring, and this task-document progress; then update its Engram mirror. Resolve the stale behavior assertion and workspace typecheck/diff blockers without touching the protected user-owned paths before claiming full-suite verification; ACU-002 remains next.
+ACU-001 and its timeout-feedback verification follow-up are complete on `master`; keep `tests/behavior.test.mjs` and all unrelated workspace typecheck/diff blockers untouched. Refresh the Engram mirror before starting ACU-002.
 
 ## Relevant Files
 

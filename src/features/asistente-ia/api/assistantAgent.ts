@@ -140,6 +140,7 @@ type TurnCallInput = {
   tools: AssistantTools;
   abortSignal: AbortSignal;
   onProgress?: (progress: AssistantTurnProgress) => void;
+  onFailure?: (error: unknown) => void;
 };
 
 function hasUsableTurn(text: string, outputs: Array<{ toolName: string }>): boolean {
@@ -201,6 +202,7 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
 
     let streamed = "";
     let streamFailed = false;
+    let streamError: unknown;
     try {
       for await (const chunk of result.textStream) {
         streamed += chunk;
@@ -209,8 +211,9 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
           thoughts: [`Proveedor: ${label}`, streamed.trim() ? "Sigue escribiendo la respuesta…" : "Sigue trabajando…"],
         });
       }
-    } catch {
+    } catch (error) {
       streamFailed = true;
+      streamError = error;
     }
 
     const text = normalizarMonedaAsistente((await awaitMaybe(result.text, streamed)) || streamed);
@@ -220,13 +223,21 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
     const outputs = toolOutputsFromResult({ toolResults, steps });
     // Do not replay a partial or failed request through a second generation call.
     if (outputs.length === 0 && (streamFailed || input.abortSignal.aborted || !hasUsableTurn(text, outputs))) {
+      if (input.abortSignal.aborted) {
+        const timeoutError = new Error("Request timed out");
+        timeoutError.name = "AbortError";
+        input.onFailure?.(timeoutError);
+      } else if (streamFailed) {
+        input.onFailure?.(streamError);
+      }
       return null;
     }
 
     const thoughts = thoughtsFromResult(`${label} · stream`, outputs);
     input.onProgress?.({ text, thoughts });
     return mapToolOutputsToResult(outputs, text, thoughts);
-  } catch {
+  } catch (error) {
+    input.onFailure?.(error);
     return null;
   }
 }
@@ -292,6 +303,9 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
       onProgress: (progress: AssistantTurnProgress) => {
         latestText = progress.text;
         input.onProgress?.(progress);
+      },
+      onFailure: (error: unknown) => {
+        lastError = error;
       },
     };
     const streamAttempt = startTimeout(STREAM_TIMEOUT_MS);

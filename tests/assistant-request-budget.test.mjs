@@ -91,7 +91,7 @@ const ollama = { providerId: "ollama", modelId: "local-model", model: {} };
 test("a failed stream does not silently replay the full turn with generateText", async () => {
   const { assistantAgent, calls } = loadAssistantAgent({
     models: [ollama],
-    streamText: () => streamResult({ error: new Error("ambiguous stream timeout") }),
+    streamText: () => streamResult({ error: new Error("ambiguous connection failure") }),
     generateText: async () => ({ text: "replayed response", toolResults: [], steps: [] }),
   });
 
@@ -134,4 +134,41 @@ test("Auto mode may fail over once per configured provider without replaying one
     ["streamText", "second"],
   ]);
   assert.equal(result.mensaje, "recovered");
+});
+
+test("an aborted stream reports the timeout message without replaying the request", async () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay === 20_000) {
+      queueMicrotask(() => callback(...args));
+      return 0;
+    }
+    return originalSetTimeout(callback, delay, ...args);
+  };
+
+  try {
+    const { assistantAgent, calls } = loadAssistantAgent({
+      models: [ollama],
+      streamText: ({ abortSignal }) => {
+        assert.equal(abortSignal.aborted, false);
+        return {
+          ...streamResult(),
+          textStream: (async function* () {
+            await Promise.resolve();
+            if (abortSignal.aborted) throw new Error("stream timed out");
+            yield "unreachable";
+          })(),
+        };
+      },
+      generateText: async () => ({ text: "unexpected generation", toolResults: [], steps: [] }),
+    });
+
+    const result = await assistantAgent.runAssistantTurn(userTurn);
+
+    assert.deepEqual(calls.map((call) => call.method), ["streamText"]);
+    assert.equal(result.mensaje, assistantAgent.assistantUserFacingError({ name: "AbortError" }));
+    assert.equal(result.mensaje, "provider timeout");
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
 });
