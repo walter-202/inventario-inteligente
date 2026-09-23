@@ -28,6 +28,7 @@ The user requested an audit and correction after observing unusually high free-t
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Keep mobile changes on the current primary branch (`master`) per the user's saved instruction; do not push or open a PR.
 - Preserve all pre-existing and concurrent working-tree changes. In particular, do not edit or revert `.atl/.skill-registry.cache.json`, `.atl/skill-registry.md`, `app.json`, `scripts/seed_lidemoda.sql`, `src/features/ajustes/screens/AISettingsScreen.tsx`, `src/features/asistente-ia/lib/aiGateway.ts`, `src/features/asistente-ia/lib/aiProviders.ts`, `src/features/auth/hooks/useAuth.tsx`, `src/features/auth/lib/authBoundary.ts`, `src/shared/lib/secureKeyStore.ts`, `tests/behavior.test.mjs`, `scripts/vault_ai_credentials_sync.sql`, or `src/features/asistente-ia/lib/aiVaultSync.ts` as part of ACU work. These paths contained concurrent changes during implementation; a later broader commit `9c86d81` records them. The initial user-owned test hunk removing the obsolete fallback assertion is now committed; do not rewrite or revert it.
+- At the latest task boundary, unrelated user-owned working-tree edits remain in `odd/tasks/auth-refresh-navigation-ux.md`, `src/features/auth/lib/authState.ts`, `src/features/ventas/screens/VentasScreen.tsx`, and `tests/auth.test.mjs`; do not stage or alter them.
 - No remote Ollama/Supabase access, secret inspection, or provider usage-dashboard access.
 - Delivery strategy was initially recorded as `ask-on-risk`; the user requires remaining on `master`, with no push or PR. The original authored-line forecast was approximate and excluded later concurrent changes.
 
@@ -53,7 +54,7 @@ The user requested an audit and correction after observing unusually high free-t
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Branch: `master` (current primary branch).
 - Feature delivery strategy: `ask-on-risk`.
-- Review workload forecast: approximately 250 authored changed lines; generated files excluded.
+- The initial review-workload forecast was approximate; later commits include broad concurrent changes, so do not treat it as the actual authored-line total.
 
 ## Verification Evidence
 
@@ -68,16 +69,18 @@ The user requested an audit and correction after observing unusually high free-t
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 4 tests, including an in-flight abort simulation that completes in under a second and verifies timeout-specific messaging without any generateText replay.
 - Parent spot-check after `ddc2bc1`: the focused request-budget suite passes 4/4; native risk assessment for the committed work returned `medium`, and receipt-driven review is off by default.
 - At the ACU-001 verification point, `npm test` passed all 70 tests, including the concurrent user-owned `tests/behavior.test.mjs` changes; that file remains untouched and unstaged by this work.
-- `npx tsc --noEmit` is blocked by unrelated workspace errors in `aiSdkProviders.ts`, the pre-existing untracked `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`.
+- `npx tsc --noEmit` is blocked by existing provider/vault module errors and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; none of the ACU-001/002 files appears in the errors.
 - `git diff --check` reports a pre-existing trailing blank line in the protected, modified `scripts/seed_lidemoda.sql`; no ACU-001 file is named in the output.
 - The focused request-budget test is included in `npm test`; no remote calls, credentials, or provider usage checks were made.
 - ACU-002 strict TDD RED: the offline cancellation test showed an aborted primary-provider stream still invoked the fallback provider; lifecycle tests also failed before the request gate/retry classification existed. GREEN: `node --test tests/assistant-chat-lifecycle.test.mjs` passes 5/5, covering cancellation without failover, synchronous duplicate rejection, session-scoped cancellation, retry identity, retryable provider/configuration failures, and the shared button/keyboard/retry wiring.
 - ACU-002 `npm test` passed 76/76 at its implementation point; the focused lifecycle suite is run explicitly and is not wired into this script. After the broader `9c86d81` commit, the writer reran the current suite at 81/81.
-- ACU-002 `npx tsc --noEmit` remains blocked only by unrelated dirty/untracked `aiSdkProviders.ts`, `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; no ACU-002 file appears in the errors.
+- ACU-002 `npx tsc --noEmit` remains blocked only by unrelated provider/vault module errors and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; no ACU-002 file appears in the errors.
 - Before the broader `9c86d81` commit, `git diff --check` reported only the pre-existing blank line at `scripts/seed_lidemoda.sql:356`; the writer later confirmed `git diff --check` passes on the clean current tree.
 - The AI SDK's installed local docs and source confirm `streamText` accepts `abortSignal`; the local provider fetch wrapper forwards its `init` unchanged, so the signal reaches the SDK fetch. No mobile/native runtime or real provider was invoked; the offline mocked harness verified one model invocation on cancellation.
 - Parent spot-check after ACU-002: `node --test tests/assistant-chat-lifecycle.test.mjs` passes 5/5. Native assessment of the current committed delta returned `medium`; receipt-driven review remains off by default.
+- The writer reran `npm test` on the integrated current tree and passed 81/81; parent independently reran the focused lifecycle suite and passed 5/5. Current `git diff --check` is clean.
 - ACU-002 lifecycle UI/helper/tests are in `a82a120`; its AI SDK abort/failover integration in `assistantAgent.ts` and `voiceCommandApi.ts` is present in the later broad `9c86d81`, not `a82a120`. The integrated current tree passes the lifecycle suite, but those commits are not a standalone ACU-002-only sequence.
+- Progress-document commits: `1c791a3` and `f932a94`; no push or PR was made.
 
 ## Next Step
 
