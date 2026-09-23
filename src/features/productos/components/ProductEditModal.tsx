@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, View, ScrollView } from "react-native";
 import { Portal, Modal, Button, Text, TextInput, HelperText, Chip } from "react-native-paper";
-import { Tag, Barcode, Layers, DollarSign, CheckCircle2 } from "lucide-react-native";
+import { Tag, Barcode, Layers, Banknote, CheckCircle2 } from "lucide-react-native";
 import { colors, radius, shadows, spacing } from "../../../shared/theme";
 import { useConfirm } from "../../../shared/components/ConfirmDialog";
 import type { Producto } from "../../../shared/types/domain";
@@ -185,7 +185,7 @@ export function ProductEditModal({
                 onChangeText={setPrecio}
                 keyboardType="decimal-pad"
                 error={Boolean(errors.precio)}
-                left={<TextInput.Icon icon={() => <DollarSign size={20} color={colors.primary} />} />}
+                left={<TextInput.Icon icon={() => <Banknote size={20} color={colors.primary} />} />}
               />
               <HelperText type="error" visible={Boolean(errors.precio)}>
                 {errors.precio}

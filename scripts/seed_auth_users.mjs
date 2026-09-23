@@ -55,6 +55,12 @@ const USERS_TO_SEED = [
     sucursal_id: null,
   },
   {
+    email: "reponedora.lidemoda@gmail.com",
+    nombre: "Reponedora Central",
+    rol: "reponedora",
+    sucursal_id: 1,
+  },
+  {
     email: "supervisora.regional@gmail.com",
     nombre: "Supervisora Regional",
     rol: "admin",

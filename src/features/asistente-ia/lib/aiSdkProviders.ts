@@ -1,6 +1,6 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateText, Output, type LanguageModel, type ModelMessage } from "ai";
+import { generateText, Output, wrapLanguageModel, type LanguageModel, type ModelMessage } from "ai";
 import type { z } from "zod";
 import {
   getApiKey,
@@ -9,7 +9,12 @@ import {
   getProviderOrder,
   type ProviderId,
 } from "../../../shared/lib/secureKeyStore";
-import { AI_PROVIDERS } from "./aiProviders";
+import { AI_PROVIDERS, resolveProviderModel } from "./aiProviders";
+import {
+  coerceGenerateToolCallInputs,
+  polyfillAbortSignalThrowIfAborted,
+  wrapFetchForToolCalls,
+} from "./providerFetch";
 
 export const ASSISTANT_CONFIG_MESSAGE =
   "Configurá tu IA en Ajustes. Sin una clave el asistente no interpreta comandos.";
@@ -26,13 +31,23 @@ export type ResolvedAssistantModel = {
 };
 
 async function resolveFetch(): Promise<typeof globalThis.fetch> {
+  polyfillAbortSignalThrowIfAborted();
   try {
     const mod = await import("expo/fetch");
-    if (mod?.fetch) return mod.fetch as unknown as typeof globalThis.fetch;
+    if (mod?.fetch) return wrapFetchForToolCalls(mod.fetch as unknown as typeof globalThis.fetch);
   } catch {
     // Node tests and environments without expo/fetch use global fetch.
   }
-  return globalThis.fetch;
+  return wrapFetchForToolCalls(globalThis.fetch);
+}
+
+function withStringToolInputs(model: LanguageModel): LanguageModel {
+  return wrapLanguageModel({
+    model,
+    middleware: {
+      wrapGenerate: async ({ doGenerate }) => coerceGenerateToolCallInputs(await doGenerate()),
+    },
+  });
 }
 
 function createProviderModel(
@@ -42,22 +57,23 @@ function createProviderModel(
   fetchImpl: typeof globalThis.fetch,
 ): LanguageModel {
   const provider = AI_PROVIDERS[providerId];
-  if (provider.type === "gemini") {
-    return createGoogleGenerativeAI({ apiKey, fetch: fetchImpl })(modelId);
-  }
-  return createOpenAICompatible({
-    name: providerId,
-    baseURL: provider.baseUrl,
-    apiKey,
-    fetch: fetchImpl,
-    headers:
-      providerId === "openrouter"
-        ? {
-            "HTTP-Referer": "https://lidemoda.app",
-            "X-Title": "Lidemoda Mobile POS",
-          }
-        : undefined,
-  })(modelId);
+  const model =
+    provider.type === "gemini"
+      ? createGoogleGenerativeAI({ apiKey, fetch: fetchImpl })(modelId)
+      : createOpenAICompatible({
+          name: providerId,
+          baseURL: provider.baseUrl,
+          apiKey,
+          fetch: fetchImpl,
+          headers:
+            providerId === "openrouter"
+              ? {
+                  "HTTP-Referer": "https://lidemoda.app",
+                  "X-Title": "Lidemoda Mobile POS",
+                }
+              : undefined,
+        })(modelId);
+  return withStringToolInputs(model);
 }
 
 /**
@@ -77,7 +93,7 @@ export async function listAssistantModels(): Promise<ResolvedAssistantModel[]> {
     const apiKey = await getApiKey(providerId);
     if (!apiKey?.trim()) continue;
     const customModel = await getCustomModel(providerId);
-    const modelId = customModel?.trim() || AI_PROVIDERS[providerId].defaultModel;
+    const modelId = resolveProviderModel(providerId, customModel);
     models.push({
       providerId,
       modelId,

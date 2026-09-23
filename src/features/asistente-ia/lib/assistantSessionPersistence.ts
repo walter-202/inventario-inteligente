@@ -1,8 +1,19 @@
-import { MAX_CHAT_MESSAGES, MAX_CHAT_SESSIONS, type ChatMessage, type ChatSession, type ChatState, type ChatTone, type EstadoSesion, type ObjetivoSesion } from "./chatSession";
+import {
+  MAX_CHAT_MESSAGES,
+  MAX_CHAT_SESSIONS,
+  type ChatAttachment,
+  type ChatMessage,
+  type ChatSession,
+  type ChatState,
+  type ChatTone,
+  type EstadoSesion,
+  type ObjetivoSesion,
+} from "./chatSession";
 
 export const MAX_STORED_SESSIONS = MAX_CHAT_SESSIONS;
 export const MAX_STORED_MESSAGES = MAX_CHAT_MESSAGES;
 const MAX_MESSAGE_TEXT_LENGTH = 1200;
+const MAX_STORED_ATTACHMENT_ROWS = 24;
 const STORAGE_VERSION = 1;
 
 export interface AsyncStorageLike {
@@ -29,6 +40,14 @@ function isTone(value: unknown): value is ChatTone {
   return value === "info" || value === "success" || value === "warning" || value === "error";
 }
 
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 function parseSession(value: unknown): ChatSession | null {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id || !isObjetivo(value.objetivo) || !isEstado(value.estado)) return null;
   if (
@@ -48,7 +67,134 @@ function parseSession(value: unknown): ChatSession | null {
   };
 }
 
-/** Stored chat is intentionally reduced to display-safe content: never restore action cards. */
+function parseStockRow(value: unknown): { sucursal: string; cantidad: number } | null {
+  if (!isRecord(value)) return null;
+  const sucursal = asNonEmptyString(value.sucursal);
+  const cantidad = asFiniteNumber(value.cantidad);
+  if (!sucursal || cantidad === null) return null;
+  return { sucursal, cantidad };
+}
+
+function parseInventoryRow(value: unknown): { nombre: string; codigo: string; cantidad: number } | null {
+  if (!isRecord(value)) return null;
+  const nombre = asNonEmptyString(value.nombre);
+  const codigo = asNonEmptyString(value.codigo);
+  const cantidad = asFiniteNumber(value.cantidad);
+  if (!nombre || !codigo || cantidad === null) return null;
+  return { nombre, codigo, cantidad };
+}
+
+function parseProductoPreview(value: unknown) {
+  if (!isRecord(value)) return null;
+  const id = asFiniteNumber(value.id);
+  const nombre = asNonEmptyString(value.nombre);
+  const codigo = asNonEmptyString(value.codigo);
+  const categoria = asNonEmptyString(value.categoria) ?? "";
+  const precio = asFiniteNumber(value.precio);
+  const cantidad = asFiniteNumber(value.cantidad) ?? 0;
+  if (id === null || !nombre || !codigo || precio === null) return null;
+  return { id, nombre, codigo, categoria, precio, cantidad };
+}
+
+function parseLowStockItem(value: unknown) {
+  if (!isRecord(value) || !isRecord(value.producto) || !isRecord(value.sucursal)) return null;
+  const id = asFiniteNumber(value.id);
+  const productoId = asFiniteNumber(value.producto_id);
+  const sucursalId = asFiniteNumber(value.sucursal_id);
+  const cantidad = asFiniteNumber(value.cantidad);
+  const threshold = asFiniteNumber(value.threshold) ?? 0;
+  const productoNombre = asNonEmptyString(value.producto.nombre);
+  const productoCodigo = asNonEmptyString(value.producto.codigo);
+  const sucursalNombre = asNonEmptyString(value.sucursal.nombre);
+  const productoInnerId = asFiniteNumber(value.producto.id);
+  const sucursalInnerId = asFiniteNumber(value.sucursal.id);
+  if (
+    id === null
+    || productoId === null
+    || sucursalId === null
+    || cantidad === null
+    || !productoNombre
+    || !productoCodigo
+    || !sucursalNombre
+    || productoInnerId === null
+    || sucursalInnerId === null
+  ) {
+    return null;
+  }
+  return {
+    id,
+    producto_id: productoId,
+    sucursal_id: sucursalId,
+    cantidad,
+    threshold,
+    producto: { id: productoInnerId, nombre: productoNombre, codigo: productoCodigo },
+    sucursal: { id: sucursalInnerId, nombre: sucursalNombre },
+  };
+}
+
+/** Read-only query cards stay in history. Action cards (confirm sale / register / pick) do not. */
+function persistableAttachment(attachment: ChatAttachment | undefined): ChatAttachment | undefined {
+  if (!attachment) return undefined;
+  if (attachment.kind === "consulta-stock") {
+    return { ...attachment, filas: attachment.filas.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
+  }
+  if (attachment.kind === "consulta-ventas") return attachment;
+  if (attachment.kind === "busqueda-productos") {
+    return { ...attachment, productos: attachment.productos.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
+  }
+  if (attachment.kind === "stock-bajo") {
+    return { ...attachment, productos: attachment.productos.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
+  }
+  if (attachment.kind === "lista-inventario") {
+    return { ...attachment, filas: attachment.filas.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
+  }
+  return undefined;
+}
+
+function parseDisplayAttachment(value: unknown): ChatAttachment | undefined {
+  if (!isRecord(value) || typeof value.kind !== "string") return undefined;
+  if (value.kind === "consulta-stock") {
+    const productoNombre = asNonEmptyString(value.productoNombre);
+    const total = asFiniteNumber(value.total);
+    if (!productoNombre || total === null || !Array.isArray(value.filas)) return undefined;
+    const filas = value.filas.map(parseStockRow).filter((row): row is NonNullable<typeof row> => row !== null);
+    return { kind: "consulta-stock", productoNombre, filas: filas.slice(0, MAX_STORED_ATTACHMENT_ROWS), total };
+  }
+  if (value.kind === "consulta-ventas") {
+    const totalVentas = asFiniteNumber(value.totalVentas);
+    const cantidadVentas = asFiniteNumber(value.cantidadVentas);
+    if (totalVentas === null || cantidadVentas === null) return undefined;
+    return { kind: "consulta-ventas", totalVentas, cantidadVentas };
+  }
+  if (value.kind === "busqueda-productos") {
+    const consulta = asNonEmptyString(value.consulta);
+    if (!consulta || !Array.isArray(value.productos)) return undefined;
+    const productos = value.productos
+      .map(parseProductoPreview)
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .slice(0, MAX_STORED_ATTACHMENT_ROWS);
+    return { kind: "busqueda-productos", consulta, productos };
+  }
+  if (value.kind === "stock-bajo") {
+    if (!Array.isArray(value.productos)) return undefined;
+    const productos = value.productos
+      .map(parseLowStockItem)
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .slice(0, MAX_STORED_ATTACHMENT_ROWS);
+    return { kind: "stock-bajo", productos };
+  }
+  if (value.kind === "lista-inventario") {
+    const minStock = asFiniteNumber(value.minStock) ?? 0;
+    if (!Array.isArray(value.filas)) return undefined;
+    const filas = value.filas
+      .map(parseInventoryRow)
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .slice(0, MAX_STORED_ATTACHMENT_ROWS);
+    return { kind: "lista-inventario", minStock, filas };
+  }
+  return undefined;
+}
+
 function parseDisplayMessage(value: unknown): ChatMessage | null {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id || (value.role !== "usuario" && value.role !== "asistente") || typeof value.texto !== "string") {
     return null;
@@ -61,16 +207,23 @@ function parseDisplayMessage(value: unknown): ChatMessage | null {
   if (isTone(value.tone)) message.tone = value.tone;
   if (Array.isArray(value.thoughts)) message.thoughts = value.thoughts.filter((thought): thought is string => typeof thought === "string").slice(0, 8);
   if (typeof value.durationMs === "number" && Number.isFinite(value.durationMs) && value.durationMs >= 0) message.durationMs = value.durationMs;
+  const attachment = parseDisplayAttachment(value.attachment);
+  if (attachment) message.attachment = attachment;
   return message;
 }
 
-function persistableMessage(message: ChatMessage): Omit<ChatMessage, "attachment"> {
-  const { attachment: _attachment, texto, thoughts, ...safe } = message;
-  return {
-    ...safe,
-    texto: texto.slice(0, MAX_MESSAGE_TEXT_LENGTH),
-    ...(thoughts ? { thoughts: thoughts.filter((thought) => typeof thought === "string").slice(0, 8) } : {}),
+function persistableMessage(message: ChatMessage): ChatMessage {
+  const attachment = persistableAttachment(message.attachment);
+  const next: ChatMessage = {
+    ...message,
+    texto: message.texto.slice(0, MAX_MESSAGE_TEXT_LENGTH),
   };
+  if (message.thoughts) {
+    next.thoughts = message.thoughts.filter((thought) => typeof thought === "string").slice(0, 8);
+  }
+  if (attachment) next.attachment = attachment;
+  else delete next.attachment;
+  return next;
 }
 
 export function assistantChatStorageKey(userId: string): string {

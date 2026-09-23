@@ -1,17 +1,47 @@
 import { z } from "zod";
 import { generateStructuredOutput } from "../lib/aiSdkProviders";
 
+const optionalText = z.preprocess((value) => {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
+}, z.string().min(1).nullable());
+
+const optionalNumber = z.preprocess((value) => {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}, z.number().finite().nonnegative().nullable());
+
+const optionalInt = z.preprocess((value) => {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}, z.number().int().nonnegative().nullable());
+
 /**
  * Schema for AI-parsed product registration fields.
  * The model extracts whatever it can from natural speech; missing fields stay null.
  */
 export const RegistroProductoSchema = z.object({
-  nombre: z.string().trim().min(1).nullable(),
-  codigo: z.string().trim().min(1).nullable(),
-  codigo_barra: z.string().trim().min(1).nullable(),
-  categoria: z.string().trim().min(1).nullable(),
-  precio: z.number().finite().nonnegative().nullable(),
-  cantidad: z.number().int().nonnegative().nullable(),
+  nombre: optionalText,
+  codigo: optionalText,
+  codigo_barra: optionalText,
+  categoria: optionalText,
+  precio: optionalNumber,
+  cantidad: optionalInt,
 });
 
 export type RegistroProductoParsed = z.infer<typeof RegistroProductoSchema>;

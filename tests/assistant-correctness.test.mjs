@@ -51,4 +51,16 @@ test("assistant prompt advertises only the supported sales period", () => {
 
   assert.match(source, /solo del día de hoy/);
   assert.match(source, /no hay semana ni mes/);
+  assert.match(source, /Código de barras escaneado/);
+  assert.match(source, /boliviano \(Bs\.\)/);
+  assert.match(source, /Nunca uses \$.*USD/);
+});
+
+test("assistant currency prose uses bolivianos, not dollar signs", () => {
+  const { normalizarMonedaAsistente } = loadTsModule("src/shared/lib/utils.ts");
+
+  assert.equal(
+    normalizarMonedaAsistente("Sombras (SKU: BEL-024) - $35 y otra a $20"),
+    "Sombras (SKU: BEL-024) - Bs. 35 y otra a Bs. 20",
+  );
 });

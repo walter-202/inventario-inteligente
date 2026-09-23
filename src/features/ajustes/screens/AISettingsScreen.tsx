@@ -29,6 +29,8 @@ import {
 import {
   PROVIDER_LIST,
   AI_PROVIDERS,
+  resolveProviderModel,
+  describeKeyProviderMismatch,
   type AIProviderDefinition,
 } from "../../asistente-ia/lib/aiProviders";
 import { testProviderConnection } from "../../asistente-ia/lib/aiGateway";
@@ -99,7 +101,8 @@ export function AISettingsScreen() {
   const handleOpenEdit = (provider: AIProviderDefinition) => {
     setEditingProvider(provider);
     setInputKey(keys[provider.id] ?? "");
-    setInputModel(customModels[provider.id] ?? "");
+    const savedModel = customModels[provider.id];
+    setInputModel(savedModel ? resolveProviderModel(provider.id, savedModel) : "");
     setShowKeyPassword(false);
     setModalTestResult(null);
   };
@@ -250,7 +253,7 @@ export function AISettingsScreen() {
 
         {PROVIDER_LIST.map((provider) => {
           const currentKey = keys[provider.id];
-          const currentModel = customModels[provider.id] || provider.defaultModel;
+          const currentModel = resolveProviderModel(provider.id, customModels[provider.id]);
           return (
             <ProviderCard
               key={provider.id}
@@ -302,6 +305,12 @@ export function AISettingsScreen() {
                 }
                 style={styles.input}
               />
+
+              {describeKeyProviderMismatch(editingProvider.id, inputKey) ? (
+                <HelperText type="error" visible>
+                  {describeKeyProviderMismatch(editingProvider.id, inputKey)}
+                </HelperText>
+              ) : null}
 
               <TextInput
                 label="Modelo (Opcional)"

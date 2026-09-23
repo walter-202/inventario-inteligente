@@ -28,17 +28,15 @@ export function ChatMessageBubble({ message, actions, children, streaming }: Cha
     );
   }
   const hasText = message.texto.trim().length > 0;
+  const statusText = message.thoughts?.[message.thoughts.length - 1] ?? "Pensando…";
   return (
     <View style={styles.assistantRow}>
       <View style={styles.avatar}>
         <Sparkles size={15} color={colors.white} />
       </View>
       <View style={styles.assistantBubble}>
-        {streaming && !hasText ? (
-          <ThinkingTrace
-            isActive
-            activeStatusText={message.thoughts?.[message.thoughts.length - 1] ?? "Pensando..."}
-          />
+        {streaming ? (
+          <ThinkingTrace isActive thoughts={message.thoughts} activeStatusText={statusText} />
         ) : (
           <ThinkingTrace thoughts={message.thoughts} durationMs={message.durationMs} />
         )}

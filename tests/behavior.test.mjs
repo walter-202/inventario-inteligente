@@ -217,6 +217,21 @@ test("secure key store saves and retrieves provider keys in fallback memory stor
   assert.equal(await getApiKey("groq"), null);
 });
 
+test("retired Groq and Cerebras model ids alias to current GPT-OSS replacements", () => {
+  const { resolveProviderModel, describeKeyProviderMismatch, AI_PROVIDERS } = loadTsModule(
+    "src/features/asistente-ia/lib/aiProviders.ts",
+  );
+
+  assert.equal(AI_PROVIDERS.groq.defaultModel, "openai/gpt-oss-120b");
+  assert.equal(resolveProviderModel("groq", null), "openai/gpt-oss-120b");
+  assert.equal(resolveProviderModel("groq", "llama-3.3-70b-versatile"), "openai/gpt-oss-120b");
+  assert.equal(resolveProviderModel("groq", "llama-3.1-8b-instant"), "openai/gpt-oss-20b");
+  assert.equal(resolveProviderModel("cerebras", "llama-3.3-70b"), "gpt-oss-120b");
+  assert.equal(resolveProviderModel("cerebras", "qwen-3.8-27b"), "qwen-3.8-27b");
+  assert.match(describeKeyProviderMismatch("cerebras", "gsk_abc"), /Groq/);
+  assert.equal(describeKeyProviderMismatch("groq", "gsk_abc"), null);
+});
+
 test("AI gateway gracefully falls back to heuristic when no API keys are present", async () => {
   const { completeChatJSON } = loadTsModule("src/features/asistente-ia/lib/aiGateway.ts");
   const { z } = loadTsModule("node_modules/zod/index.js");
@@ -302,8 +317,7 @@ test("propose_sale resolves products without writing stock or sales", async () =
     scope: assistantScope(),
     readApi: stubReadApi({
       searchProducts: async (query) => {
-        assert.equal(query, "sombras para cejas");
-        return [product];
+        return query.toLowerCase().includes("sombra") ? [product] : [];
       },
       registrarVenta: async () => { wrote = true; },
     }),
@@ -352,6 +366,101 @@ test("voice SKU normalization repairs dictated codes before matching", () => {
   const dictated = matchProduct([product], "jea 001");
   assert.equal(dictated.kind, "match");
   assert.equal(dictated.product.id, 9);
+});
+
+test("product search variants singularize Spanish plurals like labiales", async () => {
+  const { variantesBusquedaProducto, matchProduct } = loadTsModule("src/features/asistente-ia/lib/productMatching.ts");
+  const { searchProductsWithVariants, resolverCoincidencia } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const { isAssistantAbortError, isAssistantNoOutputError, assistantUserFacingError } = loadTsModule(
+    "src/features/asistente-ia/api/assistantAgent.ts",
+  );
+  const { ASSISTANT_PROVIDER_ERROR_MESSAGE, ASSISTANT_TIMEOUT_MESSAGE } = loadTsModule(
+    "src/features/asistente-ia/lib/aiSdkProviders.ts",
+  );
+
+  assert.deepEqual(variantesBusquedaProducto("labiales"), ["labiales", "labial"]);
+  assert.equal(isAssistantAbortError(new Error("timeout")), true);
+  assert.equal(isAssistantAbortError(new Error("signal is aborted without reason")), true);
+  assert.equal(isAssistantNoOutputError(new Error("No output generated. Check the stream for errors.")), true);
+  assert.equal(
+    assistantUserFacingError(new Error("No output generated. Check the stream for errors.")),
+    ASSISTANT_PROVIDER_ERROR_MESSAGE,
+  );
+  assert.equal(assistantUserFacingError(new Error("timeout")), ASSISTANT_TIMEOUT_MESSAGE);
+  assert.doesNotMatch(
+    assistantUserFacingError(new Error("No output generated\nCall Stack\n  at TransformStream")),
+    /Call Stack/,
+  );
+
+  const queries = [];
+  const labial = { id: 16, nombre: "Labial", codigo: "BEL-016", categoria: "belleza", precio: 35, cantidad: 50 };
+  const mate = { id: 18, nombre: "Labial Mate", codigo: "BEL-018", categoria: "belleza", precio: 35, cantidad: 50 };
+  const readApi = stubReadApi({
+    searchProducts: async (query) => {
+      queries.push(query);
+      return query === "labial" ? [labial, mate] : [];
+    },
+  });
+
+  const products = await searchProductsWithVariants("labiales", readApi, 12);
+  assert.deepEqual(queries, ["labiales", "labial"]);
+  assert.equal(products.length, 2);
+  assert.equal(matchProduct(products, "labiales").kind, "ambiguous");
+
+  const coincidencia = await resolverCoincidencia("labiales", readApi);
+  assert.equal(coincidencia.kind, "candidatos");
+  assert.equal(coincidencia.products.length, 2);
+});
+
+test("product search matches paraphrases like delicadas, de pestañas and agenda ahorradora", async () => {
+  const { matchProduct, extraTerminosBusquedaProducto } = loadTsModule("src/features/asistente-ia/lib/productMatching.ts");
+  const { searchProductsWithVariants, resolverCoincidencia } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+
+  const delicacy = { id: 40, nombre: "Sombra para cejas Delicacy", codigo: "RC6940", categoria: "belleza", precio: 35, cantidad: 49 };
+  const sombrasCejas = { id: 24, nombre: "Sombras para Cejas", codigo: "BEL-024", categoria: "belleza", precio: 35, cantidad: 50 };
+  const sombraIndividual = { id: 10, nombre: "Sombra Individual", codigo: "BEL-010", categoria: "belleza", precio: 35, cantidad: 50 };
+  const adhesivo = { id: 15, nombre: "Adhesivo para Pestañas", codigo: "BEL-015", categoria: "belleza", precio: 35, cantidad: 50 };
+  const mascara = { id: 13, nombre: "Máscara de Pestañas", codigo: "BEL-013", categoria: "belleza", precio: 35, cantidad: 50 };
+  const agendas = { id: 1, nombre: "Agendas Ahorradoras", codigo: "NOV-001", categoria: "novedades", precio: 30, cantidad: 50 };
+  const catalog = [delicacy, sombrasCejas, sombraIndividual, adhesivo, mascara, agendas];
+
+  assert.equal(matchProduct(catalog, "Sombra para cejas delicadas").kind, "match");
+  assert.equal(matchProduct(catalog, "Sombra para cejas delicadas").product.codigo, "RC6940");
+  assert.equal(matchProduct(catalog, "Adhesivo de pestañas").kind, "match");
+  assert.equal(matchProduct(catalog, "Adhesivo de pestañas").product.codigo, "BEL-015");
+  assert.equal(matchProduct(catalog, "Agenda ahorradora").kind, "match");
+  assert.equal(matchProduct(catalog, "Agenda ahorradora").product.codigo, "NOV-001");
+  assert.ok(extraTerminosBusquedaProducto("Sombra para cejas delicadas").includes("sombra%ceja"));
+
+  const containsIlike = (nombre, query) => {
+    const name = nombre.toLowerCase();
+    const parts = query.toLowerCase().split("%").filter(Boolean);
+    let index = 0;
+    for (const part of parts) {
+      const found = name.indexOf(part, index);
+      if (found < 0) return false;
+      index = found + part.length;
+    }
+    return parts.length > 0;
+  };
+  const readApi = stubReadApi({
+    searchProducts: async (query) => catalog.filter((product) => containsIlike(product.nombre, query)),
+  });
+
+  const sombra = await resolverCoincidencia("Sombra para cejas delicadas", readApi);
+  assert.equal(sombra.kind, "match");
+  assert.equal(sombra.product.codigo, "RC6940");
+
+  const pestañas = await resolverCoincidencia("Adhesivo de pestañas", readApi);
+  assert.equal(pestañas.kind, "match");
+  assert.equal(pestañas.product.codigo, "BEL-015");
+
+  const agenda = await resolverCoincidencia("Agenda ahorradora", readApi);
+  assert.equal(agenda.kind, "match");
+  assert.equal(agenda.product.codigo, "NOV-001");
+
+  const searched = await searchProductsWithVariants("Sombra para cejas delicadas", readApi, 12);
+  assert.equal(searched[0].codigo, "RC6940");
 });
 
 test("voice transcription stabilizer collapses spaces and repairs SKUs", () => {
@@ -1018,6 +1127,9 @@ test("list_inventory filters by stock threshold through the read API", async () 
   assert.deepEqual(result.productos.map((item) => item.productoId), [3, 1]);
   assert.equal(result.lineas.length, 0);
   assert.deepEqual(listCalls, [undefined]);
+
+  const ascending = await tools.list_inventory.execute({ min_stock: 0, sucursal: null, orden: "asc" });
+  assert.deepEqual(ascending.productos.map((item) => item.productoId), [2, 1, 3]);
 });
 
 test("AI gateway rejects malformed model JSON instead of throwing or accepting it", () => {
@@ -1150,6 +1262,39 @@ test("assistant chat persistence is user-scoped, bounded, and hydrates only disp
   assert.equal(hydrated.messages["session-21"].length, MAX_STORED_MESSAGES);
   assert.equal(hydrated.messages["session-21"][0].attachment, undefined);
 
+  const dataState = {
+    sessions: [{ id: "session-data", objetivo: "consulta", estado: "completada", resumen: "Inventario", createdAt: 1, updatedAt: 1 }],
+    activeSessionId: null,
+    messages: {
+      "session-data": [
+        {
+          id: "inv-1",
+          role: "asistente",
+          texto: "Encontré 2 productos en Comercio.",
+          attachment: {
+            kind: "lista-inventario",
+            minStock: 0,
+            filas: [
+              { nombre: "Sombra", codigo: "RC6940", cantidad: 49 },
+              { nombre: "Adhesivo", codigo: "BEL-015", cantidad: 27 },
+            ],
+          },
+        },
+        {
+          id: "sale-1",
+          role: "asistente",
+          texto: "Confirmar venta",
+          attachment: { kind: "confirmacion-venta" },
+        },
+      ],
+    },
+  };
+  await saveAssistantChat(storage, "user-data", dataState);
+  const restored = await hydrateAssistantChat(storage, "user-data");
+  assert.equal(restored.messages["session-data"][0].attachment?.kind, "lista-inventario");
+  assert.equal(restored.messages["session-data"][0].attachment?.filas?.[0]?.codigo, "RC6940");
+  assert.equal(restored.messages["session-data"][1].attachment, undefined);
+
   values.set(assistantChatStorageKey("user-a"), "{not-json");
   assert.deepEqual(await hydrateAssistantChat(storage, "user-a"), { sessions: [], activeSessionId: null, messages: {} });
 });
@@ -1175,15 +1320,108 @@ test("assistant agent loop uses streamText with generateText fallback and never 
   const agent = readFileSync(resolve("src/features/asistente-ia/api/assistantAgent.ts"), "utf8");
   const tools = readFileSync(resolve("src/features/asistente-ia/lib/assistantTools.ts"), "utf8");
   const view = readFileSync(resolve("src/features/asistente-ia/screens/VoiceCommandView.tsx"), "utf8");
+  const composer = readFileSync(resolve("src/features/asistente-ia/components/ChatComposer.tsx"), "utf8");
 
   assert.match(agent, /streamText\(/);
   assert.match(agent, /generateText\(/);
-  assert.match(agent, /stopWhen:\s*isStepCount\(5\)/);
+  assert.match(agent, /stopWhen:\s*isStepCount\(TURN_STEP_LIMIT\)/);
+  assert.match(agent, /for await \(const chunk of result\.textStream\)/);
+  assert.match(agent, /onError:\s*\(\)\s*=>\s*undefined/);
+  assert.match(agent, /GENERATE_TIMEOUT_MS/);
+  assert.match(agent, /startTimeout/);
+  assert.match(agent, /isAssistantAbortError/);
+  assert.match(agent, /assistantUserFacingError/);
+  assert.match(agent, /controller\.abort\(\)/);
+  assert.doesNotMatch(agent, /controller\.abort\(reason\)/);
   assert.match(agent, /instructions/);
+  assert.match(agent, /Código de barras escaneado/);
   assert.doesNotMatch(agent, /registrarVenta|registrar_venta/);
   assert.doesNotMatch(tools, /registrarVenta|registrar_venta|registrarProducto/);
   assert.match(view, /canExecuteAssistantWrite/);
   assert.match(view, /runAssistantTurn/);
-  assert.match(view, /onProgress/);
+  assert.match(view, /assistantUserFacingError/);
+  assert.match(view, /onScanCode/);
+  assert.match(view, /scannedBarcodeMessage/);
+  assert.match(composer, /El asistente sigue trabajando/);
+  assert.doesNotMatch(composer, /Consultar stock de \$\{code\}/);
   assert.doesNotMatch(view, /RETRY_HINT/);
+
+  const providers = readFileSync(resolve("src/features/asistente-ia/lib/aiSdkProviders.ts"), "utf8");
+  assert.match(providers, /wrapLanguageModel/);
+  assert.match(providers, /coerceGenerateToolCallInputs/);
+
+  const bubble = readFileSync(resolve("src/features/asistente-ia/components/ChatMessageBubble.tsx"), "utf8");
+  const trace = readFileSync(resolve("src/features/asistente-ia/components/ThinkingTrace.tsx"), "utf8");
+  assert.doesNotMatch(bubble, /streaming && !hasText/);
+  assert.match(trace, /setInterval/);
+  assert.match(trace, /ActivityIndicator/);
+  assert.match(trace, /Sigue trabajando/);
+});
+
+test("product registration schema accepts numeric barcodes and empty optional fields", () => {
+  const { RegistroProductoSchema } = loadTsModule("src/features/asistente-ia/api/voiceRegistrationService.ts");
+
+  const parsed = RegistroProductoSchema.safeParse({
+    nombre: "Labial mate",
+    codigo: "",
+    codigo_barra: 6924372664384,
+    categoria: null,
+    precio: "45.5",
+    cantidad: "10",
+  });
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.codigo, null);
+  assert.equal(parsed.data.codigo_barra, "6924372664384");
+  assert.equal(parsed.data.precio, 45.5);
+  assert.equal(parsed.data.cantidad, 10);
+});
+
+test("scanned barcode is recovered from chat history for product registration", () => {
+  const { extractScannedBarcode, scannedBarcodeMessage } = loadTsModule("src/features/asistente-ia/api/assistantAgent.ts");
+
+  assert.equal(
+    extractScannedBarcode(["hola", scannedBarcodeMessage("6924372664384"), "registrá el producto"]),
+    "6924372664384",
+  );
+  assert.equal(extractScannedBarcode(["Consultar stock de 7791234567890", "Ya te lo pasé"]), "7791234567890");
+  assert.equal(extractScannedBarcode(["sin código"]), null);
+});
+
+test("provider fetch stringifies object tool-call arguments before AI SDK parseToolCall", () => {
+  const { stringifyToolCallArguments, stringifySseToolCallArguments } = loadTsModule(
+    "src/features/asistente-ia/lib/providerFetch.ts",
+  );
+
+  const normalized = stringifyToolCallArguments({
+    choices: [
+      {
+        message: {
+          tool_calls: [{ function: { name: "propose_product_registration", arguments: { codigo_barra: 6924372664384 } } }],
+        },
+      },
+    ],
+  });
+  assert.equal(
+    normalized.choices[0].message.tool_calls[0].function.arguments,
+    JSON.stringify({ codigo_barra: 6924372664384 }),
+  );
+
+  const sse = stringifySseToolCallArguments(
+    'data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":{"nombre":"Labial"}}}]}}]}\n',
+  );
+  assert.match(sse, /"arguments":"{\\"nombre\\":\\"Labial\\"}"/);
+
+  const { coerceGenerateToolCallInputs } = loadTsModule("src/features/asistente-ia/lib/providerFetch.ts");
+  const coerced = coerceGenerateToolCallInputs({
+    content: [{ type: "tool-call", toolName: "propose_sale", input: { items: [{ query: "agenda", cantidad: 3 }] } }],
+  });
+  assert.equal(typeof coerced.content[0].input, "string");
+  assert.match(coerced.content[0].input, /agenda/);
+
+  const wrapSource = readFileSync(resolve("src/features/asistente-ia/lib/providerFetch.ts"), "utf8");
+  assert.match(wrapSource, /contentType\.includes\("event-stream"\)/);
+  assert.match(wrapSource, /response\.text\(\)/);
+  assert.match(wrapSource, /stringifySseToolCallArguments/);
+  assert.doesNotMatch(wrapSource, /new ReadableStream/);
+  assert.doesNotMatch(wrapSource, /new TransformStream/);
 });

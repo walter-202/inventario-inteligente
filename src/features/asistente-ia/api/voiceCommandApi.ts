@@ -1,7 +1,14 @@
 import type { DashboardLowStockItem, DashboardMetrics, Producto, Sucursal } from "../../../shared/types/domain";
 import { buscarProductoPorCodigo, buscarProductosAsistente } from "../../productos/api/productosApi";
 import { ProductoNoEncontradoError } from "../../productos/lib/productLookupErrors";
-import { matchProduct, normalizarCodigoSKU, pareceSKU } from "../lib/productMatching";
+import {
+  extraTerminosBusquedaProducto,
+  matchProduct,
+  normalizarCodigoSKU,
+  pareceSKU,
+  rankProductsByQuery,
+  variantesBusquedaProducto,
+} from "../lib/productMatching";
 import type { IntentoDesambiguacion } from "../lib/chatSession";
 import type { AssistantScopeContext } from "../lib/assistantAuthorization";
 import { obtenerStockDeProducto, obtenerInventario, obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
@@ -159,6 +166,33 @@ export type CoincidenciaProducto =
   | { kind: "candidatos"; products: Producto[] }
   | { kind: "none" };
 
+export async function searchProductsWithVariants(
+  query: string,
+  readApi: AssistantReadApi,
+  limit = 12,
+): Promise<Producto[]> {
+  const seen = new Map<number, Producto>();
+  let foundPhrase = false;
+
+  for (const term of variantesBusquedaProducto(query)) {
+    const products = await readApi.searchProducts(term, limit);
+    for (const product of products) seen.set(product.id, product);
+    if (products.length > 0) foundPhrase = true;
+  }
+
+  if (!foundPhrase) {
+    const tokenLimit = Math.max(limit, 24);
+    for (const term of extraTerminosBusquedaProducto(query)) {
+      const products = await readApi.searchProducts(term, tokenLimit);
+      for (const product of products) seen.set(product.id, product);
+    }
+  }
+
+  const ranked = rankProductsByQuery([...seen.values()], query);
+  if (ranked.length > 0) return ranked.slice(0, limit);
+  return [...seen.values()].slice(0, limit);
+}
+
 export async function resolverCoincidencia(text: string, readApi: AssistantReadApi): Promise<CoincidenciaProducto> {
   const query = text.trim();
   if (!query) return { kind: "none" };
@@ -182,7 +216,7 @@ export async function resolverCoincidencia(text: string, readApi: AssistantReadA
 
   let products: Producto[] = [];
   try {
-    products = await readApi.searchProducts(query, 12);
+    products = await searchProductsWithVariants(query, readApi, 12);
   } catch {
     throw new InterpretacionError("No se pudo buscar el producto. Revisá tu conexión y volvé a intentar.");
   }

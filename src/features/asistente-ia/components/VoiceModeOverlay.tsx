@@ -226,7 +226,7 @@ export function VoiceModeOverlay({
 
           <Text variant="bodySmall" style={styles.status}>
             {interpreting
-              ? "Interpretando…"
+              ? "Sigue trabajando… consultando datos y armando la respuesta"
               : recording
                 ? "Escuchando… tocá el orbe para enviar o terminá de hablar"
                 : transcript.trim()

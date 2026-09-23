@@ -12,6 +12,7 @@ import { buildAssistantScopeContext, canExecuteAssistantWrite } from "../lib/ass
 import { emptyAssistantChat, hydrateAssistantChat, saveAssistantChat } from "../lib/assistantSessionPersistence";
 import { getPreferredMode, setPreferredMode, type PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { colors, spacing } from "../../../shared/theme";
+import { formatearPrecio } from "../../../shared/lib/utils";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
 import { useProcesarVenta } from "../../ventas/hooks/useProcesarVenta";
@@ -31,7 +32,7 @@ import {
   type LineaInterpretada,
   type ResultadoInterpretacion,
 } from "../api/voiceCommandApi";
-import { runAssistantTurn } from "../api/assistantAgent";
+import { assistantUserFacingError, runAssistantTurn, scannedBarcodeMessage } from "../api/assistantAgent";
 import type { Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 import { ChatMessageBubble } from "../components/ChatMessageBubble";
@@ -44,8 +45,6 @@ import { SessionBar } from "../components/SessionBar";
 import { SessionDrawer } from "../components/SessionDrawer";
 import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
 import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
-
-const SUGERENCIA_SKU = "Usá el nombre exacto del producto o su código SKU.";
 
 type LineaConStock = LineaInterpretada & { available: number };
 
@@ -339,8 +338,8 @@ export function VoiceCommandView() {
     }
   };
 
-  const enviar = async () => {
-    const texto = voice.transcript.trim();
+  const enviar = async (textoForzado?: string) => {
+    const texto = (textoForzado ?? voice.transcript).trim();
     if (!texto || voice.interpreting || sale.isPending) return;
     if (voice.recording) voice.stop();
     setInspectingId(null);
@@ -498,7 +497,7 @@ export function VoiceCommandView() {
           dispatch({
             type: "fijar-resumen",
             sessionId,
-            resumen: `Ventas hoy Bs ${result.totalVentas.toFixed(2)}`,
+            resumen: `Ventas hoy ${formatearPrecio(result.totalVentas)}`,
             updatedAt: ahora(),
           });
         }
@@ -520,11 +519,10 @@ export function VoiceCommandView() {
       fijarObjetivo(sessionId, "venta");
       procesarLineasVenta(sessionId, result.lineas, result.fueCorreccion, result.pasosPensamiento, durationMs);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo interpretar la operación.";
       agregar(sessionId, {
         role: "asistente",
         tone: "error",
-        texto: `${message} ${SUGERENCIA_SKU}`,
+        texto: assistantUserFacingError(error),
         durationMs: Date.now() - startTime,
       });
     } finally {
@@ -925,7 +923,7 @@ export function VoiceCommandView() {
                 ) : null}
                 {message.attachment?.kind === "consulta-ventas" ? (
                   <Text variant="headlineSmall" style={styles.queryTotal}>
-                    Bs {message.attachment.totalVentas.toFixed(2)}
+                    {formatearPrecio(message.attachment.totalVentas)}
                     <Text variant="bodySmall" style={styles.queryBranch}>
                       {"  "}· {message.attachment.cantidadVentas} venta(s) hoy
                     </Text>
@@ -939,7 +937,7 @@ export function VoiceCommandView() {
                           <Text variant="bodySmall" style={styles.queryBranch}>{producto.nombre}</Text>
                           <Text variant="labelSmall" style={styles.queryMeta}>{producto.codigo} · {producto.categoria}</Text>
                         </View>
-                        <Text variant="labelMedium" style={styles.queryQty}>Bs {producto.precio.toFixed(2)}</Text>
+                        <Text variant="labelMedium" style={styles.queryQty}>{formatearPrecio(producto.precio)}</Text>
                       </View>
                     ))}
                   </View>
@@ -993,7 +991,7 @@ export function VoiceCommandView() {
             />
           ) : voice.interpreting ? (
             <View style={styles.thinkingActiveBox}>
-              <ThinkingTrace isActive activeStatusText="Analizando consulta y existencias..." />
+              <ThinkingTrace isActive activeStatusText="Sigue trabajando… consultando al proveedor." />
             </View>
           ) : null}
         </ScrollView>
@@ -1009,6 +1007,7 @@ export function VoiceCommandView() {
             onStart={voice.start}
             onStop={voice.stop}
             onSend={() => void enviar()}
+            onScanCode={(code) => void enviar(scannedBarcodeMessage(code))}
             onVoiceMode={abrirModoVoz}
             onRequestPermission={voice.requestPermission}
             showSuggestions={visibleMessages.length === 0 || Boolean(contextualSuggestions)}

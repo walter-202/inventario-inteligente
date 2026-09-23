@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
-import { Surface, Text } from "react-native-paper";
+import { ActivityIndicator, Surface, Text } from "react-native-paper";
 import { ChevronDown, ChevronUp, Sparkles } from "lucide-react-native";
 import { colors, spacing } from "../../../shared/theme";
 
@@ -11,21 +11,48 @@ interface ThinkingTraceProps {
   activeStatusText?: string;
 }
 
+function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 /**
  * Indicador de pensamientos y razonamiento al estilo Claude, ChatGPT y Gemini.
- * Muestra el proceso analítico paso a paso con opción colapsable.
+ * Mientras corre, muestra un spinner y el tiempo transcurrido para que se note
+ * que sigue ejecutando aunque el modelo no emita texto.
  */
 export function ThinkingTrace({ thoughts, durationMs, isActive, activeStatusText }: ThinkingTraceProps) {
   const [expanded, setExpanded] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!isActive) {
+      setElapsedMs(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    const timer = setInterval(() => setElapsedMs(Date.now() - startedAt), 400);
+    return () => clearInterval(timer);
+  }, [isActive]);
 
   if (isActive) {
+    const status = activeStatusText?.trim() || thoughts?.[thoughts.length - 1] || "Pensando…";
+    const headline = elapsedMs < 1000 ? "Trabajando…" : `Sigue trabajando · ${formatElapsed(elapsedMs)}`;
+    const hint = elapsedMs >= 8000 ? "Sigue consultando, no se trabó." : status;
     return (
       <Surface style={styles.activeContainer} elevation={0}>
         <View style={styles.activeRow}>
-          <Sparkles size={16} color={colors.primary} />
-          <Text variant="bodySmall" style={styles.activeText}>
-            {activeStatusText || "Pensando..."}
-          </Text>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <View style={styles.activeCopy}>
+            <Text variant="bodySmall" style={styles.activeText}>
+              {headline}
+            </Text>
+            <Text variant="labelSmall" style={styles.activeHint}>
+              {hint}
+            </Text>
+          </View>
         </View>
       </Surface>
     );
@@ -82,12 +109,19 @@ const styles = StyleSheet.create({
   },
   activeRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: spacing.xs,
+  },
+  activeCopy: {
+    gap: 2,
+    flexShrink: 1,
   },
   activeText: {
     color: colors.primary,
-    fontWeight: "600",
+    fontWeight: "700",
+  },
+  activeHint: {
+    color: colors.textSecondary,
   },
   container: {
     marginBottom: spacing.xs,

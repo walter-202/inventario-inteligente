@@ -155,7 +155,7 @@ async function createLiveModel() {
       name: "groq",
       baseURL: "https://api.groq.com/openai/v1",
       apiKey: groqKey,
-    })("llama-3.3-70b-versatile");
+    })("openai/gpt-oss-120b");
   }
   if (openRouterKey) {
     return createOpenAICompatible({

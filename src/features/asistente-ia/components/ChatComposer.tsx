@@ -19,6 +19,7 @@ interface ChatComposerProps {
   onSend: () => void;
   onVoiceMode: () => void;
   onRequestPermission?: () => void;
+  onScanCode?: (code: string) => void;
   showSuggestions?: boolean;
   suggestions?: string[];
 }
@@ -48,6 +49,7 @@ export function ChatComposer({
   onSend,
   onVoiceMode,
   onRequestPermission,
+  onScanCode,
   showSuggestions = false,
   suggestions,
 }: ChatComposerProps) {
@@ -105,7 +107,10 @@ export function ChatComposer({
           accessibilityLabel="Enviar mensaje"
         />
       </View>
-      <HelperText type="error" visible={Boolean(error)}>
+      <HelperText type="info" visible={interpreting}>
+        El asistente sigue trabajando. Esperá a que termine esta consulta.
+      </HelperText>
+      <HelperText type="error" visible={!interpreting && Boolean(error)}>
         {error}
       </HelperText>
 
@@ -113,9 +118,13 @@ export function ChatComposer({
         visible={scannerVisible}
         onClose={() => setScannerVisible(false)}
         onScan={(code) => {
-          onTranscriptChange(`Consultar stock de ${code}`);
+          if (onScanCode) {
+            onScanCode(code);
+            return;
+          }
+          onTranscriptChange(`Código de barras escaneado: ${code}`);
         }}
-        title="Escanear prenda para consultar"
+        title="Escanear código de barras"
       />
     </View>
   );

@@ -1,10 +1,18 @@
 import { APP_LOCALE, CURRENCY_LOCALE } from "./constants";
 
 export function formatearPrecio(precio: number): string {
-  return `$ ${precio.toLocaleString(CURRENCY_LOCALE, {
+  return `Bs. ${precio.toLocaleString(CURRENCY_LOCALE, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+/** Replaces $ / USD in assistant prose with boliviano formatting. */
+export function normalizarMonedaAsistente(texto: string): string {
+  return texto
+    .replace(/\$\s?(\d+(?:[.,]\d+)?)/g, "Bs. $1")
+    .replace(/\bUSD\b/gi, "Bs.")
+    .replace(/\bdólares?\b/gi, "bolivianos");
 }
 
 export function extraerMensajeError(error: unknown, fallback: string): string {

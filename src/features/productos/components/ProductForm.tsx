@@ -7,7 +7,7 @@ import {
   Barcode,
   ScanBarcode,
   Layers,
-  DollarSign,
+  Banknote,
   Package,
   Mic,
   Square,
@@ -487,7 +487,7 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
                 onChangeText={(value) => update("precio", value)}
                 keyboardType="decimal-pad"
                 error={Boolean(errors.precio)}
-                left={<TextInput.Icon icon={() => <DollarSign size={20} color={colors.primary} />} />}
+                left={<TextInput.Icon icon={() => <Banknote size={20} color={colors.primary} />} />}
                 placeholder="Ej: 180.00"
               />
               <HelperText type="error" visible={Boolean(errors.precio)}>{errors.precio}</HelperText>

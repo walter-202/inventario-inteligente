@@ -8,13 +8,19 @@ import { colors, spacing } from "../../../shared/theme";
 import { getAuthErrorMessage } from "../api/authApi";
 import { useAuth } from "../hooks/useAuth";
 
+const DEV_LOGIN_ACCOUNTS = [
+  { alias: "admin", label: "Admin", email: "admin.lidemoda@gmail.com" },
+  { alias: "encargada", label: "Encargada", email: "encargada.comercio@gmail.com" },
+  { alias: "cajera", label: "Cajera", email: "cajera.montenegro@gmail.com" },
+  { alias: "vendedora", label: "Vendedora", email: "vendedora.ceja@gmail.com" },
+  { alias: "almacen", label: "Almacén", email: "almacen.central@gmail.com" },
+  { alias: "marketing", label: "Marketing", email: "marketing.lidemoda@gmail.com" },
+  { alias: "reponedora", label: "Reponedora", email: "reponedora.lidemoda@gmail.com" },
+] as const;
+
 const QUICK_ALIASES: Record<string, string> = {
-  admin: "admin.lidemoda@gmail.com",
   administrador: "admin.lidemoda@gmail.com",
-  cajera: "cajera.montenegro@gmail.com",
-  encargada: "encargada.comercio@gmail.com",
-  vendedora: "vendedora.ceja@gmail.com",
-  almacen: "almacen.central@gmail.com",
+  ...Object.fromEntries(DEV_LOGIN_ACCOUNTS.map((account) => [account.alias, account.email])),
 };
 
 export function LoginScreen() {
@@ -113,56 +119,19 @@ export function LoginScreen() {
               <View style={styles.devBox}>
                 <Text variant="labelSmall" style={styles.devTitle}>Atajos de prueba rápida:</Text>
                 <View style={styles.devChips}>
-                  <Chip
-                    compact
-                    mode="outlined"
-                    onPress={() => {
-                      setEmail("admin.lidemoda@gmail.com");
-                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
-                    }}
-                  >
-                    Admin
-                  </Chip>
-                  <Chip
-                    compact
-                    mode="outlined"
-                    onPress={() => {
-                      setEmail("cajera.montenegro@gmail.com");
-                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
-                    }}
-                  >
-                    Cajera
-                  </Chip>
-                  <Chip
-                    compact
-                    mode="outlined"
-                    onPress={() => {
-                      setEmail("encargada.comercio@gmail.com");
-                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
-                    }}
-                  >
-                    Encargada
-                  </Chip>
-                  <Chip
-                    compact
-                    mode="outlined"
-                    onPress={() => {
-                      setEmail("almacen.central@gmail.com");
-                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
-                    }}
-                  >
-                    Almacén
-                  </Chip>
-                  <Chip
-                    compact
-                    mode="outlined"
-                    onPress={() => {
-                      setEmail("vendedora.ceja@gmail.com");
-                      setPassword(DEFAULT_COLLABORATOR_PASSWORD);
-                    }}
-                  >
-                    Vendedora
-                  </Chip>
+                  {DEV_LOGIN_ACCOUNTS.map((account) => (
+                    <Chip
+                      key={account.alias}
+                      compact
+                      mode="outlined"
+                      onPress={() => {
+                        setEmail(account.email);
+                        setPassword(DEFAULT_COLLABORATOR_PASSWORD);
+                      }}
+                    >
+                      {account.label}
+                    </Chip>
+                  ))}
                 </View>
               </View>
             )}

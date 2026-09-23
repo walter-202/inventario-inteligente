@@ -26,6 +26,7 @@ BEGIN
       ('vendedora.ceja@gmail.com', 'Silvia Flores', 'vendedora', 3::bigint),
       ('almacen.central@gmail.com', 'Carlos Quispe', 'almacen', 1::bigint),
       ('marketing.lidemoda@gmail.com', 'Equipo Marketing', 'marketing', NULL::bigint),
+      ('reponedora.lidemoda@gmail.com', 'Reponedora Central', 'reponedora', 1::bigint),
       ('supervisora.regional@gmail.com', 'Supervisora Regional', 'admin', NULL::bigint)
     ) AS t(email, nombre, rol, sucursal_id)
   LOOP

@@ -55,6 +55,24 @@ test("restricted access navigation backs in-stack and replaces direct links with
   });
 });
 
+test("dev login shortcuts cover all seven roles", () => {
+  const source = readFileSync(join(root, "src", "features", "auth", "screens", "LoginScreen.tsx"), "utf8");
+  const emails = [
+    "admin.lidemoda@gmail.com",
+    "encargada.comercio@gmail.com",
+    "cajera.montenegro@gmail.com",
+    "vendedora.ceja@gmail.com",
+    "almacen.central@gmail.com",
+    "marketing.lidemoda@gmail.com",
+    "reponedora.lidemoda@gmail.com",
+  ];
+  for (const email of emails) {
+    assert.match(source, new RegExp(email.replaceAll(".", "\\.")));
+  }
+  assert.match(source, /label: "Marketing"/);
+  assert.match(source, /label: "Reponedora"/);
+});
+
 test("the auth rollout is fail-closed and contains no credential provisioning", () => {
   const sql = readFileSync(join(root, "scripts", "auth-v1-rollout.sql"), "utf8");
   assert.match(sql, /AUTH_V1_PREFLIGHT_ABORT/);

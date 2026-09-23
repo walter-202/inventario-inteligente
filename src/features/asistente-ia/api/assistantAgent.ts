@@ -13,6 +13,28 @@ import {
   type AssistantToolContext,
 } from "../lib/assistantTools";
 import type { AssistantReadApi, ResultadoInterpretacion } from "./voiceCommandApi";
+import { normalizarMonedaAsistente } from "../../../shared/lib/utils";
+
+export const BARCODE_SCAN_PREFIX = "Código de barras escaneado:";
+
+export function extractScannedBarcode(texts: string[]): string | null {
+  const patterns = [
+    /c[oó]digo de barras escaneado:\s*([0-9]{8,14})/i,
+    /consultar stock de\s+([0-9]{8,14})/i,
+  ];
+  for (let index = texts.length - 1; index >= 0; index -= 1) {
+    const text = texts[index] ?? "";
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match?.[1]) return match[1];
+    }
+  }
+  return null;
+}
+
+export function scannedBarcodeMessage(code: string): string {
+  return `${BARCODE_SCAN_PREFIX} ${code.trim()}`;
+}
 
 export function buildAssistantInstructions(scope: AssistantScopeContext): string {
   const sucursales = scope.allowedBranchNames.length
@@ -22,13 +44,17 @@ export function buildAssistantInstructions(scope: AssistantScopeContext): string
     "Sos el asistente de Lidemoda, un punto de venta de moda.",
     "Respondé en español rioplatense, breve y natural.",
     "Usá las tools para consultar datos reales. No inventes productos, precios, stock ni sucursales.",
-    "Para vender, llamá propose_sale con un query corto (nombre o SKU) y la cantidad. Nunca uses la frase completa del usuario como nombre de producto.",
+    "La moneda es boliviano (Bs.). Al mencionar precios escribí siempre Bs. (ej. Bs. 35,00). Nunca uses $, USD ni dólares.",
+    "Para vender, llamá propose_sale con cada producto que dijo el usuario (el nombre aproximado vale: 'sombra para cejas delicadas', 'adhesivo de pestañas') y la cantidad. No pidas SKU ni el nombre exacto antes de buscar.",
     "propose_sale y propose_product_registration NO registran nada: solo arman una propuesta para confirmación en pantalla.",
     'Las ventas consultables son solo del día de hoy. El periodo es "hoy"; no hay semana ni mes.',
     `Sucursal activa: ${scope.activeBranchName ?? "ninguna"}.`,
     `Sucursales habilitadas: ${sucursales}.`,
-    "Si falta un dato, preguntá. Si hay varias coincidencias, pedí SKU.",
+    "Si propose_sale o search_products devuelven candidatos, no preguntes el SKU: la app muestra el selector. Solo pedí un nombre más claro si la tool no encontró nada.",
     "Si el usuario corrige una cantidad (por ejemplo \"sino 5\"), usá el producto del historial.",
+    "Si el historial trae \"Código de barras escaneado: <ean>\", ese EAN es codigo_barra. Usalo al registrar o al buscar; no lo pidas de nuevo si el usuario dice que ya te lo pasó.",
+    "Para listar inventario ordenado, pasá orden=asc (menor a mayor) o orden=desc (mayor a menor) a list_inventory.",
+    "Si una tool ya trajo una lista (inventario, stock bajo, búsqueda), no enumeres todos los ítems: la app los muestra en una tarjeta. Respondé en 1 o 2 frases: cuántos hay, sucursal y el criterio de orden.",
   ].join("\n");
 }
 
@@ -69,9 +95,27 @@ function thoughtsFromResult(
   return thoughts;
 }
 
+const TOOL_PROGRESS_LABEL: Record<string, string> = {
+  search_products: "Buscando productos en el catálogo",
+  get_stock: "Consultando stock del producto",
+  list_low_stock: "Buscando productos con stock bajo",
+  list_inventory: "Consultando el inventario de la sucursal",
+  get_sales_today: "Consultando las ventas de hoy",
+  propose_sale: "Preparando la propuesta de venta",
+  propose_product_registration: "Armando el alta del producto",
+};
+
+function toolProgressLabel(name: string): string {
+  return TOOL_PROGRESS_LABEL[name] ?? `Ejecutando ${name}`;
+}
+
 async function awaitMaybe<T>(value: PromiseLike<T> | T | undefined, fallback: T): Promise<T> {
   if (value == null) return fallback;
-  return await value;
+  try {
+    return await value;
+  } catch {
+    return fallback;
+  }
 }
 
 export type AssistantTurnProgress = {
@@ -102,49 +146,103 @@ function hasUsableTurn(text: string, outputs: Array<{ toolName: string }>): bool
   return text.trim().length > 0 || outputs.length > 0;
 }
 
-async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoInterpretacion | null> {
-  const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
-  input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Streaming…"] });
+export function isAssistantAbortError(error: unknown): boolean {
+  if (error == null) return false;
+  if (typeof error === "object" && "name" in error && (error as { name?: string }).name === "AbortError") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /abort|timed out|timeout/i.test(message);
+}
 
-  const result = streamText({
-    model: input.resolved.model,
-    instructions: input.instructions,
-    messages: input.messages,
-    tools: input.tools,
-    stopWhen: isStepCount(5),
-    abortSignal: input.abortSignal,
-  });
-
-  let streamed = "";
-  for await (const chunk of result.textStream) {
-    streamed += chunk;
-    input.onProgress?.({
-      text: streamed,
-      thoughts: [`Proveedor: ${label}`, "Streaming respuesta"],
-    });
+export function isAssistantNoOutputError(error: unknown): boolean {
+  if (error == null) return false;
+  if (typeof error === "object" && "name" in error && (error as { name?: string }).name === "AI_NoOutputGeneratedError") {
+    return true;
   }
+  const message = error instanceof Error ? error.message : String(error);
+  return /no output generated/i.test(message);
+}
 
-  const text = (await awaitMaybe(result.text, streamed)) || streamed;
-  const toolResults = await awaitMaybe(result.toolResults, []);
-  const steps = await awaitMaybe(result.steps, []);
-  const outputs = toolOutputsFromResult({ toolResults, steps });
-  if (!hasUsableTurn(text, outputs)) return null;
+export function assistantUserFacingError(error: unknown): string {
+  if (isAssistantAbortError(error)) return ASSISTANT_TIMEOUT_MESSAGE;
+  return ASSISTANT_PROVIDER_ERROR_MESSAGE;
+}
 
-  const thoughts = thoughtsFromResult(`${label} · stream`, outputs);
-  input.onProgress?.({ text, thoughts });
-  return mapToolOutputsToResult(outputs, text, thoughts);
+const STREAM_TIMEOUT_MS = 20_000;
+const GENERATE_TIMEOUT_MS = 45_000;
+const TURN_STEP_LIMIT = 8;
+
+function startTimeout(ms: number): { controller: AbortController; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    try {
+      // Do not pass an Error as abort reason: Hermes treats it as an uncaught exception.
+      controller.abort();
+    } catch {
+      /* never throw from the timer */
+    }
+  }, ms);
+  return { controller, cancel: () => clearTimeout(timer) };
+}
+
+async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoInterpretacion | null> {
+  try {
+    const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
+    input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Conectando con el proveedor…"] });
+
+    const result = streamText({
+      model: input.resolved.model,
+      instructions: input.instructions,
+      messages: input.messages,
+      tools: input.tools,
+      stopWhen: isStepCount(TURN_STEP_LIMIT),
+      abortSignal: input.abortSignal,
+      maxRetries: 0,
+      onError: () => undefined,
+    });
+
+    let streamed = "";
+    let streamFailed = false;
+    try {
+      for await (const chunk of result.textStream) {
+        streamed += chunk;
+        input.onProgress?.({
+          text: normalizarMonedaAsistente(streamed),
+          thoughts: [`Proveedor: ${label}`, streamed.trim() ? "Sigue escribiendo la respuesta…" : "Sigue trabajando…"],
+        });
+      }
+    } catch {
+      streamFailed = true;
+    }
+
+    const text = normalizarMonedaAsistente((await awaitMaybe(result.text, streamed)) || streamed);
+    const toolResults = await awaitMaybe(result.toolResults, []);
+    const steps = await awaitMaybe(result.steps, []);
+    await awaitMaybe(result.finishReason, undefined);
+    const outputs = toolOutputsFromResult({ toolResults, steps });
+    // Partial streamed copy without tools is not a finished turn: fall back to generateText.
+    if (outputs.length === 0 && (streamFailed || input.abortSignal.aborted || !hasUsableTurn(text, outputs))) {
+      return null;
+    }
+
+    const thoughts = thoughtsFromResult(`${label} · stream`, outputs);
+    input.onProgress?.({ text, thoughts });
+    return mapToolOutputsToResult(outputs, text, thoughts);
+  } catch {
+    return null;
+  }
 }
 
 async function completeTurnWithGenerate(input: TurnCallInput): Promise<ResultadoInterpretacion> {
   const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
-  input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Generando respuesta"] });
+  input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Generando respuesta. Sigue trabajando…"] });
   const result = await generateText({
     model: input.resolved.model,
     instructions: input.instructions,
     messages: input.messages,
     tools: input.tools,
-    stopWhen: isStepCount(5),
+    stopWhen: isStepCount(TURN_STEP_LIMIT),
     abortSignal: input.abortSignal,
+    maxRetries: 1,
   });
   const outputs = toolOutputsFromResult(result);
   const thoughts = thoughtsFromResult(`${label} · generateText`, outputs);
@@ -174,52 +272,69 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
     scope: input.scope,
     readApi: input.readApi,
   } satisfies AssistantToolContext);
+  let latestText = "";
+  const report = (thoughts: string[], text = latestText) => {
+    latestText = text;
+    input.onProgress?.({ text: latestText, thoughts });
+  };
   const tools = Object.fromEntries(
     Object.entries(executors).map(([name, definition]) => [
       name,
       tool({
         description: definition.description,
         inputSchema: definition.inputSchema,
-        execute: definition.execute,
+        execute: async (toolInput) => {
+          report([toolProgressLabel(name), "Sigue trabajando…"]);
+          const output = await definition.execute(toolInput);
+          report([`${toolProgressLabel(name)} · listo`, "Armando la respuesta…"]);
+          return output;
+        },
       }),
     ]),
   ) as AssistantTools;
 
   const instructions = buildAssistantInstructions(input.scope);
+  const barcode = extractScannedBarcode([...input.history.map((message) => message.texto), phrase]);
+  const instructionsWithBarcode = barcode
+    ? `${instructions}\nCódigo de barras reciente en esta conversación: ${barcode}. Si el usuario registra un producto, pasalo en codigo_barra.`
+    : instructions;
   const messages: ModelMessage[] = [...toModelMessages(input.history), { role: "user", content: phrase }];
   let lastError: unknown;
 
   for (const resolved of models) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 25_000);
-    const call = {
+    const callBase = {
       resolved,
-      instructions,
+      instructions: instructionsWithBarcode,
       messages,
       tools,
-      abortSignal: controller.signal,
-      onProgress: input.onProgress,
+      onProgress: (progress: AssistantTurnProgress) => {
+        latestText = progress.text;
+        input.onProgress?.(progress);
+      },
     };
+    const streamAttempt = startTimeout(STREAM_TIMEOUT_MS);
     try {
-      try {
-        const streamed = await completeTurnWithStream(call);
-        if (streamed) return streamed;
-      } catch (streamError) {
-        lastError = streamError;
-        if (controller.signal.aborted) continue;
-      }
-      return await completeTurnWithGenerate(call);
+      const streamed = await completeTurnWithStream({ ...callBase, abortSignal: streamAttempt.controller.signal });
+      if (streamed) return streamed;
+    } catch (streamError) {
+      lastError = streamError;
+    } finally {
+      streamAttempt.cancel();
+    }
+
+    const generateAttempt = startTimeout(GENERATE_TIMEOUT_MS);
+    try {
+      return await completeTurnWithGenerate({ ...callBase, abortSignal: generateAttempt.controller.signal });
     } catch (error) {
       lastError = error;
     } finally {
-      clearTimeout(timer);
+      generateAttempt.cancel();
     }
   }
 
-  const detail = lastError instanceof Error ? lastError.message : "";
   return {
     tipo: "aclaracion",
-    mensaje: detail.includes("abort") ? ASSISTANT_TIMEOUT_MESSAGE : ASSISTANT_PROVIDER_ERROR_MESSAGE,
-    pasosPensamiento: ["Todos los proveedores configurados fallaron"],
+    mensaje: assistantUserFacingError(lastError),
+    pasosPensamiento: ["No se pudo completar la consulta con los proveedores configurados"],
   };
 }

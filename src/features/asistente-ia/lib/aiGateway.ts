@@ -7,7 +7,12 @@ import {
   type ProviderId,
   type PreferredMode,
 } from "../../../shared/lib/secureKeyStore";
-import { AI_PROVIDERS, type AIProviderDefinition } from "./aiProviders";
+import {
+  AI_PROVIDERS,
+  describeKeyProviderMismatch,
+  resolveProviderModel,
+  type AIProviderDefinition,
+} from "./aiProviders";
 
 export interface AIMessage {
   role: "system" | "user" | "assistant";
@@ -46,6 +51,24 @@ export function parseAIJSON(rawText: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function formatProviderHttpError(
+  provider: AIProviderDefinition,
+  model: string,
+  status: number,
+  body: string,
+): string {
+  const snippet = body.replace(/\s+/g, " ").trim().slice(0, 180);
+  if (status === 404 && /does not exist|not found|model/i.test(snippet)) {
+    const fallback = provider.defaultModel;
+    return `El modelo ${model} ya no está disponible en ${provider.name}. Usá ${fallback} en Ajustes.`;
+  }
+  if (status === 401 || status === 403) {
+    return `Clave rechazada por ${provider.name}. Revisá que sea una clave ${provider.keyPlaceholder}.`;
+  }
+  if (!snippet) return `HTTP ${status} from ${provider.name}`;
+  return `HTTP ${status} from ${provider.name}: ${snippet}`;
 }
 
 async function callOpenAICompatible(
@@ -110,7 +133,7 @@ async function callOpenAICompatible(
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "");
-      throw new Error(`HTTP ${response.status} from ${provider.name}: ${errorBody.slice(0, 150)}`);
+      throw new Error(formatProviderHttpError(provider, model, response.status, errorBody));
     }
 
     const json: unknown = await response.json();
@@ -228,7 +251,12 @@ export async function testProviderConnection(
     return { ok: false, error: `Proveedor desconocido: ${providerId}` };
   }
 
-  const modelToUse = customModel?.trim() || provider.defaultModel;
+  const keyMismatch = describeKeyProviderMismatch(providerId, apiKey);
+  if (keyMismatch) {
+    return { ok: false, error: keyMismatch };
+  }
+
+  const modelToUse = resolveProviderModel(providerId, customModel);
   const systemPrompt = "Eres un evaluador de conectividad. Responde en formato JSON.";
   const userMessage = 'Devuelve exactamente: {"status":"ok","echo":"test"}';
   const testSchema = z.object({ status: z.string() });
@@ -249,6 +277,13 @@ export async function testProviderConnection(
     return { ok: true, modelUsed: modelToUse };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (/failed to fetch|network request failed/i.test(message)) {
+      return {
+        ok: false,
+        error: `No se pudo contactar a ${provider.name}. Revisá la red o que la clave sea ${provider.keyPlaceholder}.`,
+        modelUsed: modelToUse,
+      };
+    }
     return { ok: false, error: message, modelUsed: modelToUse };
   }
 }
@@ -289,7 +324,7 @@ export async function completeChatJSON<T>(
     }
 
     const customModel = await getCustomModel(providerId);
-    const modelToUse = customModel?.trim() || provider.defaultModel;
+    const modelToUse = resolveProviderModel(providerId, customModel);
 
     try {
       let rawContent = "";

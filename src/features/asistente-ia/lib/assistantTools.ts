@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Ability } from "../../auth/lib/permissions";
 import type { Producto } from "../../../shared/types/domain";
+import { normalizarMonedaAsistente } from "../../../shared/lib/utils";
 import type { AssistantScopeContext } from "./assistantAuthorization";
 import type { IntentoDesambiguacion } from "./chatSession";
 import {
@@ -8,6 +9,7 @@ import {
   defaultAssistantReadApi,
   resolveScopedBranch,
   resolverCoincidencia,
+  searchProductsWithVariants,
   type AssistantReadApi,
   type LineaInterpretada,
   type ResultadoInterpretacion,
@@ -67,12 +69,12 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
   const all: Record<AssistantToolName, AssistantToolDefinition> = {
     search_products: {
       description:
-        "Busca productos del catálogo por nombre, categoría o SKU. Usala cuando el usuario pregunta qué hay, busca una prenda o necesita ver coincidencias. NO la uses para vender (usá propose_sale) ni para stock de un producto ya identificado (usá get_stock). El query debe ser corto: nunca la frase completa del usuario.",
+        "Busca productos del catálogo por nombre aproximado, categoría o SKU. Usala cuando el usuario pregunta qué hay o no hay coincidencia. NO la uses para vender (usá propose_sale) ni para stock de un producto ya identificado (usá get_stock). Podés pasar el nombre que dijo el usuario; la búsqueda tolera plurales y de/para.",
       inputSchema: z.object({
-        query: z.string().trim().min(1).describe("Nombre, categoría o SKU. No copies la frase completa."),
+        query: z.string().trim().min(1).describe("Nombre (aunque sea aproximado), categoría o SKU."),
       }),
       execute: async ({ query }) => {
-        const productos = await readApi.searchProducts(query, 12);
+        const productos = await searchProductsWithVariants(query, readApi, 12);
         return {
           kind: "buscar_producto",
           consulta: query,
@@ -80,7 +82,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           lineas: [] as const,
           mensaje: productos.length
             ? `Encontré ${productos.length} producto${productos.length === 1 ? "" : "s"} para "${query}".`
-            : `No encontré productos para "${query}". Probá con el nombre completo o el código SKU.`,
+            : `No encontré productos para "${query}". Probá search_products otra vez con 1 o 2 palabras distintivas (sombra cejas, adhesivo pestañas). No le pidas el SKU a la persona todavía.`,
         };
       },
     },
@@ -107,7 +109,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           return toolError(
             "not_found",
             `No se encontró el producto "${query}".`,
-            "Acortá el query al nombre o SKU y volvé a llamar get_stock.",
+            "Volvé a llamar get_stock con las palabras distintivas del producto. No le pidas el SKU a la persona todavía.",
           );
         }
         const stock = await consultarStockDe(
@@ -143,20 +145,26 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
     },
     list_inventory: {
       description:
-        "Lista el inventario de la sucursal (opcionalmente con umbral mínimo de unidades). Usala para 'qué productos tenemos' o 'productos con más de 10 unidades'. NO la uses si el usuario nombra un producto concreto (get_stock / search_products).",
+        "Lista el inventario de la sucursal (opcionalmente con umbral mínimo de unidades). Usala para 'qué productos tenemos' o 'productos con más de 10 unidades'. orden=asc menor a mayor, orden=desc mayor a menor (por defecto desc). NO la uses si el usuario nombra un producto concreto (get_stock / search_products).",
       inputSchema: z.object({
         sucursal: z.string().trim().min(1).nullable().optional(),
         min_stock: z.number().int().nonnegative().nullable().optional(),
+        orden: z.enum(["asc", "desc"]).nullable().optional(),
       }),
-      execute: async ({ sucursal, min_stock }) => {
+      execute: async ({ sucursal, min_stock, orden }) => {
         const branch = await resolveScopedBranch(sucursal, readApi, scope);
         if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
         const minStock = min_stock ?? 0;
+        const direction = orden === "asc" ? 1 : -1;
         const todas = await readApi.getStockList(branch.branchId);
-        const productos = todas
+        const filtrados = todas
           .filter((item) => item.cantidad >= minStock)
-          .sort((left, right) => right.cantidad - left.cantidad || left.nombre.localeCompare(right.nombre));
+          .sort(
+            (left, right) =>
+              (left.cantidad - right.cantidad) * direction || left.nombre.localeCompare(right.nombre),
+          );
         const umbralTexto = minStock > 0 ? ` con ${minStock}+ unidades` : "";
+        const ordenTexto = orden === "asc" ? " de menor a mayor stock" : " de mayor a menor stock";
         const ambito = branch.branchName
           ? `en ${branch.branchName}`
           : branch.branchId !== undefined
@@ -166,10 +174,10 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           kind: "listar_inventario",
           filtroSucursal: branch.branchName,
           minStock,
-          productos,
+          productos: filtrados,
           lineas: [] as const,
-          mensaje: productos.length
-            ? `Encontré ${productos.length} producto${productos.length === 1 ? "" : "s"}${umbralTexto} ${ambito}.`
+          mensaje: filtrados.length
+            ? `Encontré ${filtrados.length} producto${filtrados.length === 1 ? "" : "s"}${umbralTexto} ${ambito}${ordenTexto}.`
             : `No hay productos${umbralTexto} ${ambito}.`,
         };
       },
@@ -192,18 +200,18 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           totalVentas: metrics.totalSales,
           cantidadVentas: metrics.salesCount,
           periodo: "hoy" as const,
-          mensaje: `Ventas de hoy ${sucursalText}: Bs ${metrics.totalSales.toFixed(2)} (${metrics.salesCount} transacción${metrics.salesCount === 1 ? "" : "es"}).`,
+          mensaje: `Ventas de hoy ${sucursalText}: Bs. ${metrics.totalSales.toFixed(2)} (${metrics.salesCount} transacción${metrics.salesCount === 1 ? "" : "es"}).`,
         };
       },
     },
     propose_sale: {
       description:
-        "Prepara una propuesta de venta. NUNCA registra la venta ni descuenta stock: solo valida productos y devuelve líneas para que la persona confirme en pantalla. Usala cuando el usuario quiere vender, cobrar o agregarle unidades a una venta. El query de cada ítem debe ser el nombre o SKU, no la frase completa ('Quiero vender dos sombras para cejas' → query 'sombras para cejas', cantidad 2).",
+        "Prepara una propuesta de venta. NUNCA registra la venta ni descuenta stock: solo valida productos y devuelve líneas para que la persona confirme en pantalla. Usala cuando el usuario quiere vender, cobrar o agregarle unidades a una venta. Pasá el nombre que dijo el usuario aunque sea aproximado ('sombra para cejas delicadas', 'agenda ahorradora'); la coincidencia es difusa. No pidas SKU antes de llamar esta tool.",
       inputSchema: z.object({
         items: z
           .array(
             z.object({
-              query: z.string().trim().min(1).describe("Nombre o SKU corto"),
+              query: z.string().trim().min(1).describe("Nombre aproximado o SKU"),
               cantidad: z.number().int().positive(),
             }),
           )
@@ -225,7 +233,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
             return toolError(
               "not_found",
               `No se encontró el producto "${item.query}".`,
-              "Usá un nombre más corto o el SKU exacto y volvé a llamar propose_sale.",
+              "Volvé a llamar propose_sale o search_products con las palabras distintivas (sin de/para). No le pidas el SKU a la persona todavía.",
             );
           }
           lineas.push({ producto: coincidencia.product, cantidadSolicitada: item.cantidad });
@@ -241,14 +249,15 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
     },
     propose_product_registration: {
       description:
-        "Prepara el alta de un producto. NUNCA escribe en el catálogo: solo devuelve los campos extraídos para que la persona confirme. Usala cuando el usuario quiere registrar, dar de alta o agregar una prenda nueva. Si un campo no se dictó, dejalo null.",
+        "Prepara el alta de un producto. NUNCA escribe en el catálogo: solo devuelve los campos extraídos para que la persona confirme. Usala cuando el usuario quiere registrar, dar de alta o agregar una prenda nueva. Si el historial tiene un código de barras escaneado, pasalo en codigo_barra. Si un campo no se dictó, dejalo null.",
       inputSchema: RegistroProductoSchema,
       execute: async (datos: RegistroProductoParsed) => {
         const camposExtraidos = [
           datos.nombre ? `nombre "${datos.nombre}"` : null,
           datos.codigo ? `SKU ${datos.codigo}` : null,
+          datos.codigo_barra ? `barras ${datos.codigo_barra}` : null,
           datos.categoria ? `categoría ${datos.categoria}` : null,
-          datos.precio !== null ? `precio Bs ${datos.precio}` : null,
+          datos.precio !== null ? `precio Bs. ${datos.precio}` : null,
           datos.cantidad !== null ? `stock inicial ${datos.cantidad}` : null,
         ]
           .filter(Boolean)
@@ -305,7 +314,7 @@ export function mapToolOutputsToResult(
   modelText: string,
   thoughts: string[],
 ): ResultadoInterpretacion {
-  const text = modelText.trim();
+  const text = normalizarMonedaAsistente(modelText.trim());
   for (let index = outputs.length - 1; index >= 0; index -= 1) {
     const entry = outputs[index];
     if (!entry || isToolError(entry.output)) continue;
