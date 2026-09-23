@@ -6,7 +6,6 @@ import {
   loadSpeechRecognitionAsync,
   useSpeechRecognitionEventSafe,
 } from "../../../shared/lib/speechRecognition";
-import { interpretarVoz, type ResultadoInterpretacion, type VozContexto } from "../api/voiceCommandApi";
 
 type SpeechPermission = PermissionResponse & { restricted?: boolean };
 
@@ -147,25 +146,22 @@ export function useVoiceCommand() {
     }
   }, []);
 
-  const interpret = useCallback(
-    async (contexto?: VozContexto): Promise<ResultadoInterpretacion> => {
-      setInterpreting(true);
-      setError(null);
-      try {
-        return await interpretarVoz(transcript, contexto);
-      } catch (interpretationError) {
-        const message =
-          interpretationError instanceof Error
-            ? interpretationError.message
-            : "No se pudo interpretar la operación.";
-        setError(message);
-        throw interpretationError;
-      } finally {
-        setInterpreting(false);
-      }
-    },
-    [transcript],
-  );
+  const withInterpreting = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
+    setInterpreting(true);
+    setError(null);
+    try {
+      return await fn();
+    } catch (interpretationError) {
+      const message =
+        interpretationError instanceof Error
+          ? interpretationError.message
+          : "No se pudo interpretar la operación.";
+      setError(message);
+      throw interpretationError;
+    } finally {
+      setInterpreting(false);
+    }
+  }, []);
 
   return {
     isAvailable,
@@ -181,6 +177,6 @@ export function useVoiceCommand() {
     requestPermission,
     start,
     stop,
-    interpret,
+    withInterpreting,
   };
 }

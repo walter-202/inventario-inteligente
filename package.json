@@ -39,7 +39,11 @@
     "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.1",
-    "zod": "4.6.5"
+    "zod": "4.6.5",
+    "ai": "^7.0.108",
+    "@ai-sdk/openai-compatible": "^3.0.53",
+    "@ai-sdk/google": "^4.0.76",
+    "@openrouter/ai-sdk-provider": "^3.1.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -53,6 +57,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "node --test tests/architecture.test.mjs tests/contracts.test.mjs tests/behavior.test.mjs tests/auth.test.mjs",
+    "test:spike": "node --test tests/ai-sdk-spike.test.mjs",
     "smoke:live": "node scripts/supabase-live-read-smoke.mjs",
     "build:apk": "eas build -p android --profile preview",
     "build:dev": "eas build -p android --profile development"

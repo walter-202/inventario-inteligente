@@ -6,6 +6,32 @@ import { loadTsModule } from "./load-ts.mjs";
 
 process.env.TZ = "America/Caracas";
 
+function assistantScope(overrides = {}) {
+  return {
+    userId: "user-a",
+    role: "cajera",
+    abilities: ["ai.read", "products.read", "inventory.read", "sales.read", "sales.write"],
+    activeBranchId: 2,
+    activeBranchName: "Comercio",
+    allowedBranchIds: [2],
+    allowedBranchNames: ["Comercio"],
+    ...overrides,
+  };
+}
+
+function stubReadApi(overrides = {}) {
+  return {
+    findProductByCode: async () => { throw new Error("not used"); },
+    searchProducts: async () => [],
+    stockForProduct: async () => [],
+    getBranches: async () => [{ id: 2, nombre: "Comercio" }, { id: 4, nombre: "Central" }],
+    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
+    getLowStock: async () => [],
+    getStockList: async () => [],
+    ...overrides,
+  };
+}
+
 test("payment schema accepts the documented values and rejects lowercase qr", () => {
   const { RegistrarVentaSchema } = loadTsModule("src/features/ventas/api/ventasApi.ts");
   const base = { sucursal_id: 1, productos: [{ producto_id: 1, cantidad: 1 }] };
@@ -206,57 +232,112 @@ test("AI gateway gracefully falls back to heuristic when no API keys are present
   assert.equal(result.data, null);
 });
 
-test("voice registration service extracts fields via heuristic when gateway falls back", async () => {
+test("voice registration requires AI keys and does not parse locally", async () => {
+  const { deleteApiKey, setPreferredMode } = loadTsModule("src/shared/lib/secureKeyStore.ts");
   const { interpretarRegistroProducto } = loadTsModule("src/features/asistente-ia/api/voiceRegistrationService.ts");
+  const { ASSISTANT_CONFIG_MESSAGE } = loadTsModule("src/features/asistente-ia/lib/aiSdkProviders.ts");
 
-  const phrase = "registrar blusa de seda roja código BLU-100 precio 150 cantidad 25 categoría Blusas";
-  const result = await interpretarRegistroProducto(phrase);
+  for (const id of ["groq", "cerebras", "openrouter", "gemini"]) {
+    await deleteApiKey(id);
+  }
+  await setPreferredMode("auto");
 
-  assert.equal(result.codigo, "BLU-100");
-  assert.equal(result.precio, 150);
-  assert.equal(result.cantidad, 25);
-  assert.equal(result.categoria, "Blusas");
+  await assert.rejects(
+    () => interpretarRegistroProducto("registrar blusa de seda roja código BLU-100 precio 150 cantidad 25"),
+    (error) => error instanceof Error && error.message === ASSISTANT_CONFIG_MESSAGE,
+  );
+
+  const empty = await interpretarRegistroProducto("   ");
+  assert.equal(empty.nombre, null);
+  assert.equal(empty.precio, null);
 });
 
-test("voice assistant heuristic extracts stock query and branch correctly", () => {
-  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+test("visual recognition requires AI and does not invent catalog matches without a provider", async () => {
+  const { deleteApiKey, setPreferredMode } = loadTsModule("src/shared/lib/secureKeyStore.ts");
+  const { reconocerPrendaPorImagen } = loadTsModule("src/features/asistente-ia/api/visualRecognitionService.ts");
+  const { ASSISTANT_CONFIG_MESSAGE } = loadTsModule("src/features/asistente-ia/lib/aiSdkProviders.ts");
 
-  const query1 = "¿cuánto stock queda de Jean Mom Fit en San Miguel?";
-  const res1 = interpretarHeuristica(query1);
-  assert.equal(res1.accion, "consulta_stock");
-  assert.equal(res1.consulta?.producto?.toLowerCase(), "jean mom fit");
-  assert.equal(res1.consulta?.sucursal, "san miguel");
+  for (const id of ["groq", "cerebras", "openrouter", "gemini"]) {
+    await deleteApiKey(id);
+  }
+  await setPreferredMode("auto");
 
-  const query2 = "¿cuánto stock hay de chompa roja?";
-  const res2 = interpretarHeuristica(query2);
-  assert.equal(res2.accion, "consulta_stock");
-  assert.equal(res2.consulta?.producto?.toLowerCase(), "chompa roja");
-  assert.equal(res2.consulta?.sucursal, null);
+  await assert.rejects(
+    () => reconocerPrendaPorImagen("fakebase64", []),
+    (error) => error instanceof Error && error.message === ASSISTANT_CONFIG_MESSAGE,
+  );
 });
 
-test("voice assistant heuristic detects catalog registration intent", () => {
-  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+test("assistant tools are filtered by role abilities", () => {
+  const { createAssistantToolExecutors, listToolNamesForAbilities } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
 
-  const res1 = interpretarHeuristica("quiero registrar una prenda nueva, es una chompa de alpaca código CHO-520");
-  assert.equal(res1.accion, "registro_producto");
+  assert.deepEqual(
+    listToolNamesForAbilities(["products.read", "inventory.read"]).sort(),
+    ["get_stock", "list_inventory", "list_low_stock", "search_products"].sort(),
+  );
+  assert.equal(listToolNamesForAbilities(["sales.write"]).includes("propose_sale"), true);
+  assert.equal(listToolNamesForAbilities(["sales.write"]).includes("propose_product_registration"), false);
 
-  const res2 = interpretarHeuristica("vender 2 Jean Mom Fit");
-  assert.equal(res2.accion, "venta");
+  const cajeraTools = createAssistantToolExecutors({ scope: assistantScope(), readApi: stubReadApi() });
+  assert.equal("propose_sale" in cajeraTools, true);
+  assert.equal("propose_product_registration" in cajeraTools, false);
+  assert.equal("search_products" in cajeraTools, true);
+
+  const reponedoraTools = createAssistantToolExecutors({
+    scope: assistantScope({
+      role: "reponedora",
+      abilities: ["ai.read", "products.read", "inventory.read"],
+    }),
+    readApi: stubReadApi(),
+  });
+  assert.equal("propose_sale" in reponedoraTools, false);
+  assert.equal("get_stock" in reponedoraTools, true);
 });
-test("voice assistant heuristic extracts daily sales query intent and branch correctly", () => {
-  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
 
-  const query1 = "¿cuánto se vendió hoy?";
-  const res1 = interpretarHeuristica(query1);
-  assert.equal(res1.accion, "consulta_ventas");
-  assert.equal(res1.consulta?.periodo, "hoy");
-  assert.equal(res1.consulta?.sucursal, null);
+test("propose_sale resolves products without writing stock or sales", async () => {
+  const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
+  const product = { id: 9, nombre: "Jean Mom Fit", codigo: "JEA-001", categoria: "Pantalones", precio: 185, cantidad: 10 };
+  let wrote = false;
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope(),
+    readApi: stubReadApi({
+      searchProducts: async (query) => {
+        assert.equal(query, "sombras para cejas");
+        return [product];
+      },
+      registrarVenta: async () => { wrote = true; },
+    }),
+  });
 
-  const query2 = "resumen de ventas de hoy en Comercio";
-  const res2 = interpretarHeuristica(query2);
-  assert.equal(res2.accion, "consulta_ventas");
-  assert.equal(res2.consulta?.periodo, "hoy");
-  assert.equal(res2.consulta?.sucursal, "comercio");
+  const result = await tools.propose_sale.execute({ items: [{ query: "sombras para cejas", cantidad: 2 }] });
+  assert.equal(result.kind, "venta");
+  assert.equal(result.lineas[0].cantidadSolicitada, 2);
+  assert.equal(result.lineas[0].producto.id, 9);
+  assert.equal(wrote, false);
+  assert.equal("registrarVenta" in tools.propose_sale, false);
+});
+
+test("assistant sales tool defaults to the active authorized branch and rejects excluded branches", async () => {
+  const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
+  const calls = [];
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope(),
+    readApi: stubReadApi({
+      getTodaySales: async (branchId) => {
+        calls.push(branchId);
+        return { totalSales: 15, salesCount: 1 };
+      },
+    }),
+  });
+
+  const defaultResult = await tools.get_sales_today.execute({ sucursal: null });
+  assert.equal(defaultResult.kind, "consulta_ventas");
+  assert.equal(defaultResult.periodo, "hoy");
+  assert.deepEqual(calls, [2]);
+
+  const excluded = await tools.get_sales_today.execute({ sucursal: "Central" });
+  assert.equal(excluded.error, "unknown_branch");
+  assert.deepEqual(calls, [2]);
 });
 
 test("voice SKU normalization repairs dictated codes before matching", () => {
@@ -546,16 +627,15 @@ test("fijar-resumen updates session summary without completing or closing active
   assert.equal(state.messages["s-multi"].length, 2);
 });
 
-test("voice assistant heuristic supports conversational greetings and dynamic branches", () => {
-  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
-  const saludo = interpretarHeuristica("hola buen día");
-  assert.equal(saludo.accion, "conversacion");
-  assert.equal(typeof saludo.respuestaConversacional, "string");
-
-  // Dynamic branches lookup
-  const stockCustom = interpretarHeuristica("cuanto stock queda de Jean Mom Fit en Equipetrol", ["Central", "Equipetrol"]);
-  assert.equal(stockCustom.accion, "consulta_stock");
-  assert.equal(stockCustom.consulta?.sucursal?.toLowerCase(), "equipetrol");
+test("assistant tool mapper uses model text when there is no successful tool payload", () => {
+  const { mapToolOutputsToResult } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
+  const result = mapToolOutputsToResult(
+    [{ toolName: "get_stock", output: { error: "not_found", message: "No", suggestion: "SKU" } }],
+    "No encontré ese producto. ¿Me decís el SKU?",
+    ["Tool: get_stock"],
+  );
+  assert.equal(result.tipo, "conversacion");
+  assert.match(result.mensaje, /SKU/);
 });
 
 test("camera barcode scanner normalizes scanned code and triggers search query", () => {
@@ -894,69 +974,44 @@ test("V2 RF-28: generarInsightsMarketing identifies top star, dead stock, and ca
 
 
 
-test("assistant parser only accepts named product queries and allowlisted read intents", () => {
-  const { interpretarHeuristica, VoiceInterpretationSchema } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
+test("assistant tool schemas reject unknown write actions and accept inventory listing input", () => {
+  const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope({
+      role: "encargada",
+      abilities: ["ai.read", "products.read", "inventory.read", "sales.read", "sales.write", "products.write"],
+      allowedBranchIds: [2, 4],
+      allowedBranchNames: ["Comercio", "Central"],
+    }),
+    readApi: stubReadApi(),
+  });
 
-  const broadStockQuestion = interpretarHeuristica("¿Qué productos tienen stock disponible?");
-  assert.equal(broadStockQuestion.accion, "listar_inventario");
-  assert.equal(broadStockQuestion.consulta?.min_stock, 1);
-  assert.equal(broadStockQuestion.consulta?.producto, null);
-  assert.deepEqual(broadStockQuestion.productos, []);
-
-  const productSearch = interpretarHeuristica("Buscá producto Jean Mom Fit");
-  assert.equal(productSearch.accion, "buscar_producto");
-  assert.equal(productSearch.consulta?.producto, "jean mom fit");
-
-  const lowStock = interpretarHeuristica("Mostrame el inventario con bajo stock en Central");
-  assert.equal(lowStock.accion, "consulta_bajo_stock");
-  assert.equal(lowStock.consulta?.sucursal, "central");
-
-  assert.equal(VoiceInterpretationSchema.safeParse({ accion: "eliminar_productos", productos: [] }).success, false);
-  assert.equal(VoiceInterpretationSchema.safeParse({
-    accion: "listar_inventario",
-    productos: [],
-    consulta: { producto: "jean", min_stock: 10 },
-  }).success, false);
+  assert.equal("eliminar_productos" in tools, false);
+  assert.equal(tools.list_inventory.inputSchema.safeParse({ min_stock: 10 }).success, true);
+  assert.equal(tools.list_inventory.inputSchema.safeParse({ min_stock: -1 }).success, false);
+  assert.equal(tools.propose_sale.inputSchema.safeParse({ items: [] }).success, false);
+  assert.equal(tools.search_products.inputSchema.safeParse({ query: "Jean Mom Fit" }).success, true);
 });
 
-test("assistant heuristic parses inventory listing with a stock threshold instead of a product search", () => {
-  const { interpretarHeuristica } = loadTsModule("src/features/asistente-ia/api/aiInterpretationService.ts");
-
-  const threshold = interpretarHeuristica("dime mis productos disponibles mayor a 10 unidades");
-  assert.equal(threshold.accion, "listar_inventario");
-  assert.equal(threshold.consulta?.min_stock, 10);
-  assert.equal(threshold.consulta?.producto, null);
-
-  const listAll = interpretarHeuristica("¿Qué productos tenemos en el catálogo?");
-  assert.equal(listAll.accion, "listar_inventario");
-  assert.equal(listAll.consulta?.min_stock, null);
-
-  const stockQuery = interpretarHeuristica("¿cuánto stock queda de Jean Mom Fit?");
-  assert.equal(stockQuery.accion, "consulta_stock");
-  assert.equal(stockQuery.consulta?.producto?.toLowerCase(), "jean mom fit");
-});
-
-test("voice inventory listing dispatch filters by threshold through the read API", async () => {
-  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+test("list_inventory filters by stock threshold through the read API", async () => {
+  const { createAssistantToolExecutors, mapToolOutputsToResult } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
   const listCalls = [];
-  const readApi = {
-    findProductByCode: async () => { throw new Error("not used"); },
-    searchProducts: async () => [],
-    stockForProduct: async () => [],
-    getBranches: async () => [{ id: 1, nombre: "Central" }],
-    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
-    getLowStock: async () => [],
-    getStockList: async (branchId) => {
-      listCalls.push(branchId);
-      return [
-        { productoId: 1, nombre: "Jean Mom Fit", codigo: "JEA-001", cantidad: 12 },
-        { productoId: 2, nombre: "Chompa Roja", codigo: "CHO-002", cantidad: 4 },
-        { productoId: 3, nombre: "Vestido Gala", codigo: "VES-003", cantidad: 25 },
-      ];
-    },
-  };
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope({ activeBranchId: undefined, activeBranchName: null, allowedBranchIds: [], allowedBranchNames: [] }),
+    readApi: stubReadApi({
+      getStockList: async (branchId) => {
+        listCalls.push(branchId);
+        return [
+          { productoId: 1, nombre: "Jean Mom Fit", codigo: "JEA-001", cantidad: 12 },
+          { productoId: 2, nombre: "Chompa Roja", codigo: "CHO-002", cantidad: 4 },
+          { productoId: 3, nombre: "Vestido Gala", codigo: "VES-003", cantidad: 25 },
+        ];
+      },
+    }),
+  });
 
-  const result = await interpretarVoz("dime mis productos disponibles mayor a 10 unidades", undefined, readApi);
+  const output = await tools.list_inventory.execute({ min_stock: 10, sucursal: null });
+  const result = mapToolOutputsToResult([{ toolName: "list_inventory", output }], "", ["Tool: list_inventory"]);
 
   assert.equal(result.tipo, "listar_inventario");
   assert.equal(result.minStock, 10);
@@ -972,76 +1027,81 @@ test("AI gateway rejects malformed model JSON instead of throwing or accepting i
   assert.deepEqual(parseAIJSON("```json\n{\"accion\":\"consulta_stock\"}\n```"), { accion: "consulta_stock" });
 });
 
-test("voice product search dispatches only the extracted product name to the read API", async () => {
-  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+test("search_products dispatches only the extracted product name to the read API", async () => {
+  const { createAssistantToolExecutors, mapToolOutputsToResult } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
   const receivedQueries = [];
   const product = { id: 9, nombre: "Jean Mom Fit", codigo: "JEA-001", categoria: "Pantalones", precio: 185, cantidad: 10 };
-  const readApi = {
-    findProductByCode: async () => product,
-    searchProducts: async (query) => {
-      receivedQueries.push(query);
-      return [product];
-    },
-    stockForProduct: async () => [],
-    getBranches: async () => [],
-    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
-    getLowStock: async () => [],
-  };
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope(),
+    readApi: stubReadApi({
+      findProductByCode: async () => product,
+      searchProducts: async (query) => {
+        receivedQueries.push(query);
+        return [product];
+      },
+    }),
+  });
 
-  const result = await interpretarVoz("Buscá producto Jean Mom Fit", undefined, readApi);
+  const output = await tools.search_products.execute({ query: "Jean Mom Fit" });
+  const result = mapToolOutputsToResult([{ toolName: "search_products", output }], "", []);
 
   assert.equal(result.tipo, "buscar_producto");
-  assert.deepEqual(receivedQueries, ["jean mom fit"]);
+  assert.deepEqual(receivedQueries, ["Jean Mom Fit"]);
 });
 
-test("voice read dispatch filters low stock and today's sales by an exact branch", async () => {
-  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+test("read tools filter low stock and today's sales by an exact authorized branch", async () => {
+  const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
   const calls = { lowStock: [], todaySales: [] };
-  const readApi = {
-    findProductByCode: async () => { throw new Error("not used"); },
-    searchProducts: async () => [],
-    stockForProduct: async () => [],
-    getBranches: async () => [{ id: 4, nombre: "Central" }],
-    getTodaySales: async (branchId) => {
-      calls.todaySales.push(branchId);
-      return { totalSales: 320, salesCount: 2 };
-    },
-    getLowStock: async (branchId) => {
-      calls.lowStock.push(branchId);
-      return [];
-    },
-  };
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope({
+      allowedBranchIds: [2, 4],
+      allowedBranchNames: ["Comercio", "Central"],
+    }),
+    readApi: stubReadApi({
+      getTodaySales: async (branchId) => {
+        calls.todaySales.push(branchId);
+        return { totalSales: 320, salesCount: 2 };
+      },
+      getLowStock: async (branchId) => {
+        calls.lowStock.push(branchId);
+        return [];
+      },
+    }),
+  });
 
-  const lowStock = await interpretarVoz("Mostrame el inventario con bajo stock en Central", undefined, readApi);
-  assert.equal(lowStock.tipo, "consulta_bajo_stock");
+  const lowStock = await tools.list_low_stock.execute({ sucursal: "Central" });
+  assert.equal(lowStock.kind, "consulta_bajo_stock");
   assert.deepEqual(calls.lowStock, [4]);
 
-  const todaySales = await interpretarVoz("Resumen de ventas de hoy en Central", undefined, readApi);
-  assert.equal(todaySales.tipo, "consulta_ventas");
+  const todaySales = await tools.get_sales_today.execute({ sucursal: "Central" });
+  assert.equal(todaySales.kind, "consulta_ventas");
   assert.equal(todaySales.periodo, "hoy");
   assert.deepEqual(calls.todaySales, [4]);
 });
 
-test("voice read dispatch rejects an unknown explicit branch before an unfiltered sales query", async () => {
-  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+test("sales tool rejects an unknown explicit branch before querying", async () => {
+  const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
   let todaySalesCalls = 0;
-  const readApi = {
-    findProductByCode: async () => { throw new Error("not used"); },
-    searchProducts: async () => [],
-    stockForProduct: async () => [],
-    getBranches: async () => [{ id: 4, nombre: "Central" }],
-    getTodaySales: async () => {
-      todaySalesCalls += 1;
-      return { totalSales: 0, salesCount: 0 };
-    },
-    getLowStock: async () => [],
-  };
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope({
+      allowedBranchIds: [4],
+      allowedBranchNames: ["Central"],
+      activeBranchId: 4,
+      activeBranchName: "Central",
+    }),
+    readApi: stubReadApi({
+      getBranches: async () => [{ id: 4, nombre: "Central" }],
+      getTodaySales: async () => {
+        todaySalesCalls += 1;
+        return { totalSales: 0, salesCount: 0 };
+      },
+    }),
+  });
 
-  const result = await interpretarVoz("Resumen de ventas de hoy en Fantasma", undefined, readApi);
-
-  assert.equal(result.tipo, "aclaracion");
+  const result = await tools.get_sales_today.execute({ sucursal: "Fantasma" });
+  assert.equal(result.error, "unknown_branch");
   assert.equal(todaySalesCalls, 0);
-  assert.match(result.mensaje, /Fantasma/i);
+  assert.match(result.message, /Fantasma/i);
 });
 
 test("today sales calendar uses local midnight boundaries rather than the dashboard's seven-day window", () => {
@@ -1111,27 +1171,19 @@ test("assistant scope selects only authorized branches and rechecks writes", () 
 });
 
 
-test("assistant read intents default to the current authorized branch and reject excluded branches", async () => {
-  const { interpretarVoz } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
-  const calls = [];
-  const readApi = {
-    findProductByCode: async () => { throw new Error("not used"); },
-    searchProducts: async () => [],
-    stockForProduct: async () => [],
-    getBranches: async () => [{ id: 1, nombre: "Central" }, { id: 2, nombre: "Comercio" }],
-    getTodaySales: async (branchId) => { calls.push(branchId); return { totalSales: 15, salesCount: 1 }; },
-    getLowStock: async () => [],
-  };
-  const authorization = {
-    userId: "user-a", role: "cajera", abilities: ["ai.read", "sales.read"],
-    activeBranchId: 2, activeBranchName: "Comercio", allowedBranchIds: [2], allowedBranchNames: ["Comercio"],
-  };
+test("assistant agent loop uses streamText with generateText fallback and never writes from propose_sale", () => {
+  const agent = readFileSync(resolve("src/features/asistente-ia/api/assistantAgent.ts"), "utf8");
+  const tools = readFileSync(resolve("src/features/asistente-ia/lib/assistantTools.ts"), "utf8");
+  const view = readFileSync(resolve("src/features/asistente-ia/screens/VoiceCommandView.tsx"), "utf8");
 
-  const defaultResult = await interpretarVoz("Ventas de hoy", { sucursales: ["Comercio"], authorization }, readApi);
-  assert.equal(defaultResult.tipo, "consulta_ventas");
-  assert.deepEqual(calls, [2]);
-
-  const excludedResult = await interpretarVoz("Ventas de hoy en Central", { sucursales: ["Comercio"], authorization }, readApi);
-  assert.equal(excludedResult.tipo, "aclaracion");
-  assert.deepEqual(calls, [2]);
+  assert.match(agent, /streamText\(/);
+  assert.match(agent, /generateText\(/);
+  assert.match(agent, /stopWhen:\s*isStepCount\(5\)/);
+  assert.match(agent, /instructions/);
+  assert.doesNotMatch(agent, /registrarVenta|registrar_venta/);
+  assert.doesNotMatch(tools, /registrarVenta|registrar_venta|registrarProducto/);
+  assert.match(view, /canExecuteAssistantWrite/);
+  assert.match(view, /runAssistantTurn/);
+  assert.match(view, /onProgress/);
+  assert.doesNotMatch(view, /RETRY_HINT/);
 });

@@ -11,10 +11,11 @@ interface ChatMessageBubbleProps {
   message: ChatMessage;
   actions?: AssistantAction[];
   children?: ReactNode;
+  streaming?: boolean;
 }
 
 /** Burbuja estilo chat: usuario a la derecha, asistente con avatar, razonamiento y adjuntos. */
-export function ChatMessageBubble({ message, actions, children }: ChatMessageBubbleProps) {
+export function ChatMessageBubble({ message, actions, children, streaming }: ChatMessageBubbleProps) {
   if (message.role === "usuario") {
     return (
       <View style={styles.userRow}>
@@ -26,14 +27,24 @@ export function ChatMessageBubble({ message, actions, children }: ChatMessageBub
       </View>
     );
   }
+  const hasText = message.texto.trim().length > 0;
   return (
     <View style={styles.assistantRow}>
       <View style={styles.avatar}>
         <Sparkles size={15} color={colors.white} />
       </View>
       <View style={styles.assistantBubble}>
-        <ThinkingTrace thoughts={message.thoughts} durationMs={message.durationMs} />
-        <AssistantReply message={{ tone: message.tone ?? "info", text: message.texto, actions }} />
+        {streaming && !hasText ? (
+          <ThinkingTrace
+            isActive
+            activeStatusText={message.thoughts?.[message.thoughts.length - 1] ?? "Pensando..."}
+          />
+        ) : (
+          <ThinkingTrace thoughts={message.thoughts} durationMs={message.durationMs} />
+        )}
+        {hasText ? (
+          <AssistantReply message={{ tone: message.tone ?? "info", text: message.texto, actions }} />
+        ) : null}
         {children}
       </View>
     </View>

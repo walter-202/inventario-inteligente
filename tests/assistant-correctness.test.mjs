@@ -47,8 +47,8 @@ test("switching assistant users never deletes the previous user's persisted chat
 });
 
 test("assistant prompt advertises only the supported sales period", () => {
-  const source = read("src/features/asistente-ia/api/aiInterpretationService.ts");
+  const source = read("src/features/asistente-ia/api/assistantAgent.ts");
 
-  assert.match(source, /"periodo": "hoy" \| null/);
-  assert.doesNotMatch(source, /"periodo": "hoy" \| "semana" \| "mes" \| null/);
+  assert.match(source, /solo del día de hoy/);
+  assert.match(source, /no hay semana ni mes/);
 });

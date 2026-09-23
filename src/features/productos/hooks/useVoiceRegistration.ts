@@ -102,9 +102,9 @@ export function useVoiceRegistration() {
           setResult(parsed);
           setState("done");
         }
-      } catch {
+      } catch (err) {
         if (!cancelled) {
-          setError("No se pudo interpretar el dictado. Intenta de nuevo.");
+          setError(err instanceof Error ? err.message : "No se pudo interpretar el dictado. Intenta de nuevo.");
           setState("error");
         }
       }
@@ -171,8 +171,8 @@ export function useVoiceRegistration() {
       setResult(parsed);
       setState("done");
       return parsed;
-    } catch {
-      setError("No se pudo interpretar el dictado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo interpretar el dictado.");
       setState("error");
       return null;
     }

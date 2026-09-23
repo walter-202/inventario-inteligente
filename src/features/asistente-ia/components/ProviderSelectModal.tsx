@@ -16,7 +16,7 @@ const OPCIONES: { id: PreferredMode; label: string; hint: string }[] = [
   { id: "cerebras", label: "Cerebras", hint: "Cuota generosa" },
   { id: "openrouter", label: "OpenRouter", hint: "Modelos variados" },
   { id: "gemini", label: "Gemini", hint: "Google" },
-  { id: "heuristic", label: "Offline", hint: "Sin internet, solo local" },
+  { id: "heuristic", label: "Offline", hint: "No interpreta: pide configurar IA" },
 ];
 
 /** Configuración del motor: radio simple en diálogo, aplica al elegir. */

@@ -15,8 +15,10 @@ test("Supabase RPC names and payload keys remain backward compatible", () => {
   for (const token of ["registrar_venta", "p_metodo_pago", "p_productos"]) assert.match(sales, new RegExp(token));
 });
 
-test("AI boundary uses a Zod schema before accepting Gemini output", () => {
-  const service = read("src/features/asistente-ia/api/aiInterpretationService.ts");
-  assert.match(service, /VoiceInterpretationSchema/);
-  assert.match(service, /safeParse/);
+test("AI tools validate input with Zod schemas", () => {
+  const tools = read("src/features/asistente-ia/lib/assistantTools.ts");
+  assert.match(tools, /search_products/);
+  assert.match(tools, /propose_sale/);
+  assert.match(tools, /inputSchema/);
+  assert.match(tools, /z\.object/);
 });

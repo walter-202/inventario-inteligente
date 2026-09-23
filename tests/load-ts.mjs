@@ -14,6 +14,29 @@ Module._load = function (request, parent, isMain) {
       AppState: { addEventListener: () => ({ remove: () => {} }) },
     };
   }
+  if (request === "ai") {
+    return {
+      generateText: async () => ({ text: "", toolCalls: [], toolResults: [], steps: [], output: undefined }),
+      streamText: () => ({
+        textStream: (async function* () {})(),
+        text: Promise.resolve(""),
+        toolResults: Promise.resolve([]),
+        steps: Promise.resolve([]),
+      }),
+      tool: (definition) => definition,
+      isStepCount: () => () => true,
+      Output: { object: (value) => value },
+    };
+  }
+  if (request === "expo/fetch") {
+    return { fetch: globalThis.fetch };
+  }
+  if (request === "@ai-sdk/openai-compatible") {
+    return { createOpenAICompatible: () => (modelId) => ({ modelId }) };
+  }
+  if (request === "@ai-sdk/google") {
+    return { createGoogleGenerativeAI: () => (modelId) => ({ modelId }) };
+  }
   if (request === "@react-native-async-storage/async-storage") {
     return {
       getItem: async () => null,

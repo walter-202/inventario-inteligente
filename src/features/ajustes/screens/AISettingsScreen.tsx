@@ -224,7 +224,7 @@ export function AISettingsScreen() {
 
           <HelperText type="info" visible>
             {preferredMode === "auto" &&
-              "Intenta en orden de velocidad y cuota gratuita disponible (Groq → Cerebras → OpenRouter → Gemini). Si fallan, usa heurística local."}
+              "Intenta en orden de velocidad y cuota gratuita (Groq → Cerebras → OpenRouter → Gemini). Si fallan, avisa para revisar la clave."}
             {preferredMode === "groq" &&
               `Fuerza el uso de Groq Cloud (${customModels.groq || AI_PROVIDERS.groq.defaultModel}).`}
             {preferredMode === "cerebras" &&
@@ -233,7 +233,8 @@ export function AISettingsScreen() {
               `Fuerza el uso de OpenRouter (${customModels.openrouter || AI_PROVIDERS.openrouter.defaultModel}).`}
             {preferredMode === "gemini" &&
               `Fuerza el uso de Google Gemini (${customModels.gemini || AI_PROVIDERS.gemini.defaultModel}).`}
-            {preferredMode === "heuristic" && "Modo sin IA externa: procesa comandos localmente sin internet."}
+            {preferredMode === "heuristic" &&
+              "No llama a ningún proveedor. El asistente pide configurar la IA en Ajustes; no interpreta nada en el teléfono."}
           </HelperText>
         </Card.Content>
       </Card>

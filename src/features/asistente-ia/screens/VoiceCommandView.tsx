@@ -30,8 +30,8 @@ import {
   consultarStockDe,
   type LineaInterpretada,
   type ResultadoInterpretacion,
-  type VozContexto,
 } from "../api/voiceCommandApi";
+import { runAssistantTurn } from "../api/assistantAgent";
 import type { Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
 import { ChatMessageBubble } from "../components/ChatMessageBubble";
@@ -45,7 +45,6 @@ import { SessionDrawer } from "../components/SessionDrawer";
 import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
 import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
 
-const RETRY_HINT = "Corregí el texto abajo y enviá de nuevo.";
 const SUGERENCIA_SKU = "Usá el nombre exacto del producto o su código SKU.";
 
 type LineaConStock = LineaInterpretada & { available: number };
@@ -90,6 +89,7 @@ export function VoiceCommandView() {
   const [shortage, setShortage] = useState<{ messageId: string; lines: LineaConStock[] } | null>(null);
   const [papelera, setPapelera] = useState<{ session: ChatSession; messages: ChatMessage[] } | null>(null);
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
+  const [streamDraft, setStreamDraft] = useState<{ text: string; thoughts: string[] } | null>(null);
   const idRef = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const persistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -207,7 +207,7 @@ export function VoiceCommandView() {
     durationMs?: number,
   ) => {
     if (activeBranch === null) {
-      agregar(sessionId, { role: "asistente", tone: "error", texto: `No hay sucursal activa para registrar la venta. ${RETRY_HINT}` });
+      agregar(sessionId, { role: "asistente", tone: "error", texto: "No hay sucursal activa para registrar la venta." });
       return;
     }
     setLastLines(lineas);
@@ -218,7 +218,7 @@ export function VoiceCommandView() {
       agregar(sessionId, {
         role: "asistente",
         tone: "warning",
-        texto: `${error instanceof Error ? error.message : "Líneas ambiguas."} ${RETRY_HINT}`,
+        texto: error instanceof Error ? error.message : "Líneas ambiguas.",
       });
       return;
     }
@@ -279,7 +279,7 @@ export function VoiceCommandView() {
       .filter((line) => line.cantidadSolicitada > 0);
     setShortage(null);
     if (capped.length === 0) {
-      agregar(sessionId, { role: "asistente", tone: "info", texto: `Sin stock disponible en ${branchName}. ${RETRY_HINT}` });
+      agregar(sessionId, { role: "asistente", tone: "info", texto: `Sin stock disponible en ${branchName}.` });
       return;
     }
     setPendingConfirmation(
@@ -334,7 +334,7 @@ export function VoiceCommandView() {
       agregar(sessionId, {
         role: "asistente",
         tone: "error",
-        texto: `${error instanceof Error ? error.message : "No se pudo consultar el stock."} ${RETRY_HINT}`,
+        texto: error instanceof Error ? error.message : "No se pudo consultar el stock.",
       });
     }
   };
@@ -351,29 +351,32 @@ export function VoiceCommandView() {
     setPendingRegistration(null);
     setShortage(null);
     const startTime = Date.now();
+    if (!assistantScope) {
+      agregar(sessionId, { role: "asistente", tone: "error", texto: "Sin sucursal habilitada para usar el asistente." });
+      return;
+    }
     try {
       const activeMessages = chat.messages[sessionId] ?? [];
       const historial = activeMessages.map((m) => ({
         role: m.role,
         texto: m.texto,
       }));
-      const sucursalesDisponibles = assistantScope?.allowedBranchNames ?? [];
-      const ultimoProducto = lastLines[0]?.producto?.nombre;
 
-      const contexto: VozContexto = {
-        ultimoProductoNombre: ultimoProducto,
-        historial,
-        sucursales: sucursalesDisponibles,
-        authorization: assistantScope ?? undefined,
-      };
-
-      const result: ResultadoInterpretacion = await voice.interpret(contexto);
+      setStreamDraft({ text: "", thoughts: ["Consultando al proveedor…"] });
+      const result: ResultadoInterpretacion = await voice.withInterpreting(() =>
+        runAssistantTurn({
+          text: texto,
+          history: historial,
+          scope: assistantScope,
+          onProgress: (progress) => setStreamDraft(progress),
+        }),
+      );
       const durationMs = Date.now() - startTime;
       if (result.tipo === "aclaracion") {
         agregar(sessionId, {
           role: "asistente",
           tone: "info",
-          texto: `${result.mensaje} ${RETRY_HINT}`,
+          texto: result.mensaje,
           thoughts: result.pasosPensamiento,
           durationMs,
         });
@@ -524,6 +527,8 @@ export function VoiceCommandView() {
         texto: `${message} ${SUGERENCIA_SKU}`,
         durationMs: Date.now() - startTime,
       });
+    } finally {
+      setStreamDraft(null);
     }
   };
 
@@ -672,7 +677,7 @@ export function VoiceCommandView() {
   const cancelarConfirmacion = () => {
     const sessionId = chat.activeSessionId;
     setPendingConfirmation(null);
-    if (sessionId) agregar(sessionId, { role: "asistente", tone: "info", texto: `Venta en pausa. ${RETRY_HINT}` });
+    if (sessionId) agregar(sessionId, { role: "asistente", tone: "info", texto: "Venta en pausa. Podés dictar otra operación." });
   };
 
   const nuevaSesion = () => {
@@ -976,7 +981,17 @@ export function VoiceCommandView() {
               );
             })
           )}
-          {voice.interpreting ? (
+          {streamDraft ? (
+            <ChatMessageBubble
+              streaming
+              message={{
+                id: "stream-draft",
+                role: "asistente",
+                texto: streamDraft.text,
+                thoughts: streamDraft.thoughts,
+              }}
+            />
+          ) : voice.interpreting ? (
             <View style={styles.thinkingActiveBox}>
               <ThinkingTrace isActive activeStatusText="Analizando consulta y existencias..." />
             </View>

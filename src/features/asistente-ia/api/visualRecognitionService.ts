@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { completeChatJSON } from "../lib/aiGateway";
+import type { ModelMessage } from "ai";
+import { generateStructuredOutput, listAssistantModels, ASSISTANT_CONFIG_MESSAGE } from "../lib/aiSdkProviders";
 import { obtenerProductos } from "../../productos/api/productosApi";
 import type { Producto, VisualRecognitionResult } from "../../../shared/types/domain";
 
@@ -23,10 +24,41 @@ export const VisualRecognitionSchema = z.object({
   ),
 });
 
+const INSTRUCTIONS = [
+  "Sos un clasificador experto de indumentaria textil para el sistema Lidemoda POS.",
+  "Analizá la imagen de la prenda e identificá categoria, color_principal, tipo_corte y caracteristicas_distintivas.",
+  "Compará con el catálogo y devolvé hasta 3 candidatos ordenados por confianza (0.0 a 1.0).",
+  "producto_id, nombre, codigo, categoria y precio deben coincidir con el catálogo. No inventes productos.",
+  "Si no hay coincidencia razonable, devolvé candidatos vacío y describí igual la prenda.",
+].join("\n");
+
+function imageFilePart(imageBase64: string): { type: "file"; mediaType: "image/jpeg"; data: string } {
+  const comma = imageBase64.indexOf(",");
+  const data =
+    imageBase64.startsWith("data:") && comma >= 0 ? imageBase64.slice(comma + 1) : imageBase64;
+  return { type: "file", mediaType: "image/jpeg", data };
+}
+
+function filterCatalogMatches(
+  result: VisualRecognitionResult,
+  products: Producto[],
+): VisualRecognitionResult {
+  const byId = new Map(products.map((product) => [product.id, product]));
+  return {
+    analisis_prenda: result.analisis_prenda,
+    candidatos: result.candidatos.filter((candidate) => byId.has(candidate.producto_id)).slice(0, 3),
+  };
+}
+
 export async function reconocerPrendaPorImagen(
   imageBase64: string,
   catalogo?: Producto[],
 ): Promise<VisualRecognitionResult> {
+  const models = await listAssistantModels();
+  if (models.length === 0) {
+    throw new Error(ASSISTANT_CONFIG_MESSAGE);
+  }
+
   let products = catalogo;
   if (!products || products.length === 0) {
     const res = await obtenerProductos({ page: 1 });
@@ -41,67 +73,25 @@ export async function reconocerPrendaPorImagen(
     precio: p.precio,
   }));
 
-  const systemPrompt = `Eres un clasificador experto de indumentaria textil para el sistema Lidemoda POS.
-Analiza la imagen de la prenda proporcionada e identifica sus atributos visuales:
-- categoria (ej: Remera, Pantalón, Vestido, Campera, Buzo, Short, etc.)
-- color_principal (ej: Negro, Blanco, Azul marino, Beige, etc.)
-- tipo_corte (ej: Oversize, Slim fit, Clásico, Manga corta, etc.)
-- caracteristicas_distintivas (ej: Cuello redondo, con estampado frontal, liso, etc.)
-
-Luego, compara la prenda con el catálogo disponible de productos y devuelve hasta 3 candidatos que mejor coincidan, ordenados por confianza descendente (confidence entre 0.0 y 1.0).
-
-Debes responder ÚNICAMENTE con un objeto JSON con este esquema exacto:
-{
-  "analisis_prenda": {
-    "categoria": string,
-    "color_principal": string,
-    "tipo_corte": string,
-    "caracteristicas_distintivas": string
-  },
-  "candidatos": [
+  const messages: ModelMessage[] = [
     {
-      "producto_id": number,
-      "nombre": string,
-      "codigo": string,
-      "categoria": string,
-      "precio": number,
-      "confidence": number,
-      "razon": string
-    }
-  ]
-}`;
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Catálogo de productos disponibles:\n${JSON.stringify(catalogSummary)}\n\nAnalizá la prenda de la imagen y determiná a qué producto del catálogo corresponde.`,
+        },
+        imageFilePart(imageBase64),
+      ],
+    },
+  ];
 
-  const userMessage = `Catálogo de productos disponibles:\n${JSON.stringify(catalogSummary, null, 2)}\n\nPor favor analiza la prenda de la imagen y determina a qué producto del catálogo corresponde.`;
-
-  const result = await completeChatJSON({
-    systemPrompt,
-    userMessage,
-    imageBase64,
+  const parsed = await generateStructuredOutput({
     schema: VisualRecognitionSchema,
-    timeoutMs: 15000,
+    instructions: INSTRUCTIONS,
+    messages,
+    timeoutMs: 20_000,
   });
 
-  if (result.data) {
-    return result.data;
-  }
-
-  // Fallback heurístico si no hay conexión o no hay API key configurada
-  const first3 = products.slice(0, 3);
-  return {
-    analisis_prenda: {
-      categoria: "Prenda de catálogo",
-      color_principal: "No identificado (Modo heurístico)",
-      tipo_corte: "Estándar",
-      caracteristicas_distintivas: "Reconocimiento asistido local",
-    },
-    candidatos: first3.map((p, idx) => ({
-      producto_id: p.id,
-      nombre: p.nombre,
-      codigo: p.codigo,
-      categoria: p.categoria,
-      precio: p.precio,
-      confidence: Math.max(0.5, 0.9 - idx * 0.15),
-      razon: `Coincidencia sugerida del catálogo activo (${p.categoria})`,
-    })),
-  };
+  return filterCatalogMatches(parsed, products);
 }
