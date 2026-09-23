@@ -37,10 +37,10 @@ The user requested an audit and correction after observing unusually high free-t
   - Acceptance: a stream timeout/failure cannot silently trigger a second full generation to the same provider; tool loops have an explicit lower per-provider step cap; automatic SDK retries are disabled on the retained generation path; timeout errors remain accurately classified; deterministic tests assert invocation/fallback behavior.
   - Checks: focused request-count and timeout-error tests first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit` (blocked by unrelated concurrent workspace errors unless those clear).
   - Rollback boundary: `src/features/asistente-ia/api/assistantAgent.ts`, the focused request-policy test, and `package.json` test wiring; do not include any `tests/behavior.test.mjs` hunk because it belongs to concurrent user work.
-- [ ] ACU-002 — Guard and cancel chat submissions.
-  - Acceptance: synchronous duplicate sends are rejected across button/keyboard paths; leaving or changing the active chat aborts its request; failed requests retain the user's text and require an explicit retry action; cancellation does not trigger provider failover.
-  - Checks: focused send-lock/cancel/draft tests first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit`.
-  - Rollback boundary: the assistant screen/composer request-lifecycle changes and their focused tests only.
+- [x] ACU-002 — Guard and cancel chat submissions.
+  - Acceptance: button and keyboard sends share a synchronous single-flight guard; leaving the screen, switching sessions, deleting the active session, or changing users aborts the request; a failed request keeps its submitted draft and offers an explicit retry without duplicating the user message; caller cancellation does not trigger provider failover.
+  - Checks: focused lifecycle tests first (RED), then GREEN/REFACTOR; `node --test tests/assistant-chat-lifecycle.test.mjs`; `npm test`; `npx tsc --noEmit`.
+  - Rollback boundary: `src/features/asistente-ia/api/assistantAgent.ts`, `src/features/asistente-ia/api/voiceCommandApi.ts`, `src/features/asistente-ia/lib/assistantChatRequestLifecycle.ts`, `src/features/asistente-ia/screens/VoiceCommandView.tsx`, `src/features/asistente-ia/components/ChatComposer.tsx`, and `tests/assistant-chat-lifecycle.test.mjs` only.
 - [ ] ACU-003 — Align provider choice and request-state UX.
   - Acceptance: configured Ollama and Mistral choices appear in the chat picker; current progress identifies the provider/attempt state; a user-triggered retry is distinguishable from an automatic request; no credentials are displayed.
   - Checks: provider-picker contract test first (RED), then GREEN/REFACTOR; `npm test`; `npx tsc --noEmit`.
@@ -48,7 +48,7 @@ The user requested an audit and correction after observing unusually high free-t
 
 ## Progress
 
-- Status: ACU-001 request cap and timeout-specific error reporting implemented and committed as `e500349` and `ddc2bc1`; ACU-002 and ACU-003 remain planned.
+- Status: ACU-001 request cap and timeout-specific error reporting implemented and committed as `e500349` and `ddc2bc1`; ACU-002 request lifecycle and retry UX implemented and verified; ACU-003 remains planned.
 - TDD mode: strict, user-selected for assistant reliability.
 - Test runner: `npm test`; type verification: `npx tsc --noEmit`.
 - Branch: `master` (current primary branch).
@@ -62,19 +62,24 @@ The user requested an audit and correction after observing unusually high free-t
 - Expo SDK 57.0.0 versioned documentation was consulted before any source change.
 - Strict TDD RED: the new offline request-budget tests failed because a stream error invoked both `streamText` and `generateText`, and because the tool-step cap was 8 instead of the expected 4.
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 3 tests; a failed stream makes no same-provider `generateText` call, the retained stream path uses `maxRetries: 0` and a 4-step cap, and Auto failover makes at most one stream attempt per configured provider.
-- Earlier writer verification ran 69 tests and passed 68 because the then-current dirty `tests/behavior.test.mjs` asserted that `generateText()` and `GENERATE_TIMEOUT_MS` remain after ACU-001 removed that fallback. A concurrent user-owned diff later removed the obsolete assertion; this task preserved that file untouched and unstaged.
+- Earlier ACU-001 writer verification ran 69 tests and passed 68 because the then-current dirty `tests/behavior.test.mjs` asserted that `generateText()` and `GENERATE_TIMEOUT_MS` remain after ACU-001 removed that fallback. A concurrent user-owned diff later removed the obsolete assertion; this task preserved that file untouched and unstaged.
 - Independent verification confirmed the focused tests count mocked AI SDK calls, but initially found that swallowed stream errors left `lastError` unset, so exhausted providers lost the specific timeout message.
 - Strict TDD follow-up RED: the new simulated-abort test immediately fired the internal 20-second timeout callback and failed because the final message was generic provider error instead of timeout-specific.
 - GREEN: `node --test tests/assistant-request-budget.test.mjs` passes 4 tests, including an in-flight abort simulation that completes in under a second and verifies timeout-specific messaging without any generateText replay.
 - Parent spot-check after `ddc2bc1`: the focused request-budget suite passes 4/4; native risk assessment for the committed work returned `medium`, and receipt-driven review is off by default.
-- Current `npm test` passes all 70 tests, including the concurrent user-owned `tests/behavior.test.mjs` changes; that file remains untouched and unstaged by this work.
+- At the ACU-001 verification point, `npm test` passed all 70 tests, including the concurrent user-owned `tests/behavior.test.mjs` changes; that file remains untouched and unstaged by this work.
 - `npx tsc --noEmit` is blocked by unrelated workspace errors in `aiSdkProviders.ts`, the pre-existing untracked `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`.
 - `git diff --check` reports a pre-existing trailing blank line in the protected, modified `scripts/seed_lidemoda.sql`; no ACU-001 file is named in the output.
 - The focused request-budget test is included in `npm test`; no remote calls, credentials, or provider usage checks were made.
+- ACU-002 strict TDD RED: the offline cancellation test showed an aborted primary-provider stream still invoked the fallback provider; lifecycle tests also failed before the request gate/retry classification existed. GREEN: `node --test tests/assistant-chat-lifecycle.test.mjs` passes 5/5, covering cancellation without failover, synchronous duplicate rejection, session-scoped cancellation, retry identity, retryable provider/configuration failures, and the shared button/keyboard/retry wiring.
+- ACU-002 `npm test` passes 76/76; the focused lifecycle suite is run explicitly and is not wired into this script.
+- ACU-002 `npx tsc --noEmit` remains blocked only by unrelated dirty/untracked `aiSdkProviders.ts`, `aiVaultSync.ts`, and missing `react-native-drawer-layout` types in `AppDrawerProvider.tsx`; no ACU-002 file appears in the errors.
+- ACU-002 `git diff --check` reports only the pre-existing blank line at protected `scripts/seed_lidemoda.sql:356`.
+- The AI SDK's installed local docs and source confirm `streamText` accepts `abortSignal`; the local provider fetch wrapper forwards its `init` unchanged, so the signal reaches the SDK fetch. No mobile/native runtime or real provider was invoked; the offline mocked harness verified one model invocation on cancellation.
 
 ## Next Step
 
-ACU-001 and its timeout-feedback verification follow-up are complete on `master`; keep `tests/behavior.test.mjs` and all unrelated workspace typecheck/diff blockers untouched. Refresh the Engram mirror before starting ACU-002.
+ACU-001 and ACU-002 are complete on `master`; preserve the user-owned changes and do not start ACU-003 until separately authorized. The next work unit is the provider-picker/progress UX slice.
 
 ## Relevant Files
 
