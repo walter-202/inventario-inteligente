@@ -21,13 +21,16 @@ BEGIN
   FOR v_users IN
     SELECT * FROM (VALUES
       ('admin.lidemoda@gmail.com', 'Administrador General', 'admin', NULL::bigint),
+      ('supervisora.regional@gmail.com', 'Supervisora Regional', 'admin', NULL::bigint),
+      ('marketing.lidemoda@gmail.com', 'Equipo Marketing', 'marketing', NULL::bigint),
+      ('almacen.central@gmail.com', 'Carlos Quispe', 'almacen', 1::bigint),
       ('encargada.comercio@gmail.com', 'Patricia Morales', 'encargada', 1::bigint),
+      ('reponedora.comercio@gmail.com', 'Mariana Gutiérrez', 'reponedora', 1::bigint),
       ('cajera.montenegro@gmail.com', 'Valeria Mendoza', 'cajera', 2::bigint),
       ('vendedora.ceja@gmail.com', 'Silvia Flores', 'vendedora', 3::bigint),
-      ('almacen.central@gmail.com', 'Carlos Quispe', 'almacen', 1::bigint),
-      ('marketing.lidemoda@gmail.com', 'Equipo Marketing', 'marketing', NULL::bigint),
       ('reponedora.lidemoda@gmail.com', 'Reponedora Central', 'reponedora', 1::bigint),
-      ('supervisora.regional@gmail.com', 'Supervisora Regional', 'admin', NULL::bigint)
+      ('encargada.satelite@gmail.com', 'Gabriela Mamani', 'encargada', 4::bigint),
+      ('cajera.rioseco@gmail.com', 'Jovana Choque', 'cajera', 5::bigint)
     ) AS t(email, nombre, rol, sucursal_id)
   LOOP
     SELECT id INTO v_id FROM auth.users WHERE email = v_users.email;
@@ -300,3 +303,54 @@ BEGIN
   END IF;
 
 END $$;
+
+-- ----------------------------------------------------------------------------
+-- 5. ÓRDENES DE DESPACHO INTER-SUCURSAL (en_transito y recibido)
+-- ----------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_prod_ids bigint[];
+BEGIN
+  SELECT array_agg(id ORDER BY id) INTO v_prod_ids FROM (SELECT id FROM public.productos LIMIT 10) t;
+
+  IF NOT EXISTS (SELECT 1 FROM public.ordenes_despacho WHERE numero_guia = 'GD-20260922-0101') THEN
+    INSERT INTO public.ordenes_despacho (numero_guia, sucursal_origen_id, sucursal_destino_id, producto_id, cantidad_despachada, estado, fecha_despacho, observacion, created_at)
+    VALUES ('GD-20260922-0101', 1, 2, v_prod_ids[1], 10, 'en_transito', now() - interval '3 hours', 'Reposición semanal para Zona Sur', now() - interval '3 hours');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.ordenes_despacho WHERE numero_guia = 'GD-20260922-0102') THEN
+    INSERT INTO public.ordenes_despacho (numero_guia, sucursal_origen_id, sucursal_destino_id, producto_id, cantidad_despachada, estado, fecha_despacho, observacion, created_at)
+    VALUES ('GD-20260922-0102', 1, 3, v_prod_ids[2], 15, 'en_transito', now() - interval '4 hours', 'Despacho urgente chompas temporada', now() - interval '4 hours');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.ordenes_despacho WHERE numero_guia = 'GD-20260920-0088') THEN
+    INSERT INTO public.ordenes_despacho (numero_guia, sucursal_origen_id, sucursal_destino_id, producto_id, cantidad_despachada, cantidad_recibida, estado, fecha_despacho, fecha_recepcion, observacion, created_at)
+    VALUES ('GD-20260920-0088', 1, 2, v_prod_ids[5], 20, 20, 'recibido', now() - interval '2 days 4 hours', now() - interval '2 days 1 hour', 'Recepción conforme sin observaciones', now() - interval '2 days 4 hours');
+  END IF;
+END $$;
+
+-- ----------------------------------------------------------------------------
+-- 6. REGISTRO DE MERMAS Y DETERIORO DE PRENDAS
+-- ----------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_prod_ids bigint[];
+BEGIN
+  SELECT array_agg(id ORDER BY id) INTO v_prod_ids FROM (SELECT id FROM public.productos LIMIT 10) t;
+
+  IF NOT EXISTS (SELECT 1 FROM public.mermas WHERE motivo = 'rotura' AND sucursal_id = 1) THEN
+    INSERT INTO public.mermas (sucursal_id, producto_id, cantidad, motivo, observacion, created_at)
+    VALUES (1, v_prod_ids[1], 1, 'rotura', 'Desgarro en costura lateral durante prueba en vestidor', now() - interval '6 days');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.mermas WHERE motivo = 'mancha' AND sucursal_id = 2) THEN
+    INSERT INTO public.mermas (sucursal_id, producto_id, cantidad, motivo, observacion, created_at)
+    VALUES (2, v_prod_ids[3], 1, 'mancha', 'Mancha irreparable de cosmético en exhibición', now() - interval '4 days');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.mermas WHERE motivo = 'falla_costura' AND sucursal_id = 3) THEN
+    INSERT INTO public.mermas (sucursal_id, producto_id, cantidad, motivo, observacion, created_at)
+    VALUES (3, v_prod_ids[6], 1, 'falla_costura', 'Cierre principal trabado y desalineado de fábrica', now() - interval '3 days');
+  END IF;
+END $$;
+

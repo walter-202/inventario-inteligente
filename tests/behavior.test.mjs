@@ -202,7 +202,7 @@ test("sale submission boundary keeps a reentrant second sale locked after async 
 });
 
 test("secure key store saves and retrieves provider keys in fallback memory store", async () => {
-  const { setApiKey, getApiKey, deleteApiKey, setPreferredMode, getPreferredMode, setCustomModel, getCustomModel } = loadTsModule("src/shared/lib/secureKeyStore.ts");
+  const { setApiKey, getApiKey, deleteApiKey, setPreferredMode, getPreferredMode, setCustomModel, getCustomModel, clearAllLocalAIKeys } = loadTsModule("src/shared/lib/secureKeyStore.ts");
 
   await setApiKey("groq", "gsk_test_12345");
   assert.equal(await getApiKey("groq"), "gsk_test_12345");
@@ -213,12 +213,14 @@ test("secure key store saves and retrieves provider keys in fallback memory stor
   await setPreferredMode("cerebras");
   assert.equal(await getPreferredMode(), "cerebras");
 
-  await deleteApiKey("groq");
+  await clearAllLocalAIKeys();
   assert.equal(await getApiKey("groq"), null);
+  assert.equal(await getCustomModel("groq"), null);
+  assert.equal(await getPreferredMode(), "auto");
 });
 
 test("retired Groq and Cerebras model ids alias to current GPT-OSS replacements", () => {
-  const { resolveProviderModel, describeKeyProviderMismatch, AI_PROVIDERS } = loadTsModule(
+  const { resolveProviderModel, describeKeyProviderMismatch, AI_PROVIDERS, PROVIDER_LIST } = loadTsModule(
     "src/features/asistente-ia/lib/aiProviders.ts",
   );
 
@@ -227,9 +229,22 @@ test("retired Groq and Cerebras model ids alias to current GPT-OSS replacements"
   assert.equal(resolveProviderModel("groq", "llama-3.3-70b-versatile"), "openai/gpt-oss-120b");
   assert.equal(resolveProviderModel("groq", "llama-3.1-8b-instant"), "openai/gpt-oss-20b");
   assert.equal(resolveProviderModel("cerebras", "llama-3.3-70b"), "gpt-oss-120b");
-  assert.equal(resolveProviderModel("cerebras", "qwen-3.8-27b"), "qwen-3.8-27b");
+  assert.equal(AI_PROVIDERS.cerebras.defaultModel, "gpt-oss-120b");
+  assert.equal(AI_PROVIDERS.gemini.defaultModel, "gemini-2.5-flash");
+  assert.equal(resolveProviderModel("gemini", "gemini-3.8-flash"), "gemini-2.5-flash");
+  assert.equal(AI_PROVIDERS.mistral.defaultModel, "mistral-small-latest");
+  assert.equal(resolveProviderModel("mistral", null), "mistral-small-latest");
+  assert.equal(AI_PROVIDERS.ollama.defaultModel, "gpt-oss:120b");
+  assert.equal(resolveProviderModel("ollama", null), "gpt-oss:120b");
+  assert.equal(resolveProviderModel("ollama", "llama3.3"), "gpt-oss:120b");
+  assert.equal(AI_PROVIDERS.sambanova.defaultModel, "Meta-Llama-3.3-70B-Instruct");
+  assert.equal(resolveProviderModel("sambanova", null), "Meta-Llama-3.3-70B-Instruct");
+  assert.equal(PROVIDER_LIST.length, 7);
   assert.match(describeKeyProviderMismatch("cerebras", "gsk_abc"), /Groq/);
   assert.equal(describeKeyProviderMismatch("groq", "gsk_abc"), null);
+  assert.equal(describeKeyProviderMismatch("mistral", "any-key"), null);
+  assert.equal(describeKeyProviderMismatch("ollama", "ollama"), null);
+  assert.equal(describeKeyProviderMismatch("sambanova", "any-key"), null);
 });
 
 test("AI gateway gracefully falls back to heuristic when no API keys are present", async () => {
@@ -252,7 +267,7 @@ test("voice registration requires AI keys and does not parse locally", async () 
   const { interpretarRegistroProducto } = loadTsModule("src/features/asistente-ia/api/voiceRegistrationService.ts");
   const { ASSISTANT_CONFIG_MESSAGE } = loadTsModule("src/features/asistente-ia/lib/aiSdkProviders.ts");
 
-  for (const id of ["groq", "cerebras", "openrouter", "gemini"]) {
+  for (const id of ["groq", "cerebras", "sambanova", "mistral", "ollama", "openrouter", "gemini"]) {
     await deleteApiKey(id);
   }
   await setPreferredMode("auto");
@@ -272,7 +287,7 @@ test("visual recognition requires AI and does not invent catalog matches without
   const { reconocerPrendaPorImagen } = loadTsModule("src/features/asistente-ia/api/visualRecognitionService.ts");
   const { ASSISTANT_CONFIG_MESSAGE } = loadTsModule("src/features/asistente-ia/lib/aiSdkProviders.ts");
 
-  for (const id of ["groq", "cerebras", "openrouter", "gemini"]) {
+  for (const id of ["groq", "cerebras", "sambanova", "mistral", "ollama", "openrouter", "gemini"]) {
     await deleteApiKey(id);
   }
   await setPreferredMode("auto");
@@ -1316,18 +1331,17 @@ test("assistant scope selects only authorized branches and rechecks writes", () 
 });
 
 
-test("assistant agent loop uses streamText with generateText fallback and never writes from propose_sale", () => {
+test("assistant agent loop uses streamText and never writes from propose_sale", () => {
   const agent = readFileSync(resolve("src/features/asistente-ia/api/assistantAgent.ts"), "utf8");
   const tools = readFileSync(resolve("src/features/asistente-ia/lib/assistantTools.ts"), "utf8");
   const view = readFileSync(resolve("src/features/asistente-ia/screens/VoiceCommandView.tsx"), "utf8");
   const composer = readFileSync(resolve("src/features/asistente-ia/components/ChatComposer.tsx"), "utf8");
 
   assert.match(agent, /streamText\(/);
-  assert.match(agent, /generateText\(/);
   assert.match(agent, /stopWhen:\s*isStepCount\(TURN_STEP_LIMIT\)/);
   assert.match(agent, /for await \(const chunk of result\.textStream\)/);
   assert.match(agent, /onError:\s*\(\)\s*=>\s*undefined/);
-  assert.match(agent, /GENERATE_TIMEOUT_MS/);
+  assert.match(agent, /STREAM_TIMEOUT_MS/);
   assert.match(agent, /startTimeout/);
   assert.match(agent, /isAssistantAbortError/);
   assert.match(agent, /assistantUserFacingError/);

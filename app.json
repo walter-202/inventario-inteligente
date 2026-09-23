@@ -1,14 +1,18 @@
 {
   "expo": {
     "name": "Lidemoda",
-    "slug": "mobile",
+    "slug": "inventario-inteligente",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/icon.png"
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Permitir a Lidemoda reconocer tu voz para registrar operaciones.",
+        "NSMicrophoneUsageDescription": "Permitir a Lidemoda utilizar el micrófono para registrar operaciones por voz."
+      }
     },
     "android": {
       "package": "com.lidemoda.app",
@@ -57,6 +61,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "eed3bc29-2081-4b46-a346-3808e994ecc3"
+      }
+    },
+    "owner": "walter_202"
   }
 }

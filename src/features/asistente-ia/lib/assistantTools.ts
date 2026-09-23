@@ -123,7 +123,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
     },
     list_low_stock: {
       description:
-        "Lista productos con stock bajo. Usala para 'qué está por agotarse'. NO la uses para un producto puntual (get_stock) ni para listar todo el inventario.",
+        "Lista EXCLUSIVAMENTE productos en alerta crítica de stock bajo (stock <= stock_minimo para reponer). Usala solo para 'qué está por agotarse' o 'qué falta reponer'. NUNCA la uses si el usuario pide ordenar o dictar inventario ('de menor a mayor', 'de mayor a menor', etc.): para ordenar productos usá SIEMPRE list_inventory con orden='asc' o 'desc'.",
       inputSchema: z.object({
         sucursal: z.string().trim().min(1).nullable().optional(),
       }),
@@ -145,7 +145,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
     },
     list_inventory: {
       description:
-        "Lista el inventario de la sucursal (opcionalmente con umbral mínimo de unidades). Usala para 'qué productos tenemos' o 'productos con más de 10 unidades'. orden=asc menor a mayor, orden=desc mayor a menor (por defecto desc). NO la uses si el usuario nombra un producto concreto (get_stock / search_products).",
+        "Lista y ordena el inventario de productos de la sucursal. OBLIGATORIA para peticiones de ordenamiento o listado general como 'díctame de menor a mayor', 'de menor a mayor', 'de mayor a menor', 'ordenar por stock', 'qué productos tenemos' o 'con más de N unidades'. Usa orden='asc' para 'de menor a mayor' (menos stock primero) y orden='desc' para 'de mayor a menor'. NUNCA uses list_low_stock para ordenar de menor a mayor.",
       inputSchema: z.object({
         sucursal: z.string().trim().min(1).nullable().optional(),
         min_stock: z.number().int().nonnegative().nullable().optional(),

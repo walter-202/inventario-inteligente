@@ -60,8 +60,10 @@ function formatProviderHttpError(
   body: string,
 ): string {
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 180);
-  if (status === 404 && /does not exist|not found|model/i.test(snippet)) {
-    const fallback = provider.defaultModel;
+  if (status === 404 && /does not exist|not found|model|decommissioned/i.test(snippet)) {
+    const fallback = provider.defaultModel === model
+      ? (provider.recommendedModels.find((m) => m !== model) || "un modelo activo")
+      : provider.defaultModel;
     return `El modelo ${model} ya no está disponible en ${provider.name}. Usá ${fallback} en Ajustes.`;
   }
   if (status === 401 || status === 403) {

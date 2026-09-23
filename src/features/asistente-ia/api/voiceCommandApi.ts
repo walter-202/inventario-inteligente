@@ -103,7 +103,7 @@ export const defaultAssistantReadApi: AssistantReadApi = {
 };
 
 export type ResultadoInterpretacion =
-  | { tipo: "aclaracion"; mensaje: string; pasosPensamiento?: string[] }
+  | { tipo: "aclaracion"; mensaje: string; pasosPensamiento?: string[]; retryable?: boolean }
   | { tipo: "conversacion"; mensaje: string; pasosPensamiento?: string[] }
   | { tipo: "registro_producto"; datos: RegistroProductoParsed; mensaje: string; pasosPensamiento?: string[] }
   | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean; pasosPensamiento?: string[] }

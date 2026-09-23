@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import {
   Button,
   Card,
@@ -34,25 +34,41 @@ import {
   type AIProviderDefinition,
 } from "../../asistente-ia/lib/aiProviders";
 import { testProviderConnection } from "../../asistente-ia/lib/aiGateway";
+import {
+  syncAIKeysFromCloud,
+  syncAIKeyToCloud,
+  deleteAIKeyFromCloud,
+  syncAIPreferencesToCloud,
+} from "../../asistente-ia/lib/aiVaultSync";
 import { ProviderCard } from "../components/ProviderCard";
 import { colors, spacing, radius } from "../../../shared/theme";
+
+const INITIAL_KEYS: Record<ProviderId, string | null> = {
+  groq: null,
+  cerebras: null,
+  sambanova: null,
+  mistral: null,
+  ollama: null,
+  openrouter: null,
+  gemini: null,
+};
+
+const INITIAL_MODELS: Record<ProviderId, string | null> = {
+  groq: null,
+  cerebras: null,
+  sambanova: null,
+  mistral: null,
+  ollama: null,
+  openrouter: null,
+  gemini: null,
+};
 
 export function AISettingsScreen() {
   const [loading, setLoading] = useState(true);
   const { requestConfirm, dialog: confirmDialog } = useConfirm();
   const [preferredMode, setPreferredModeState] = useState<PreferredMode>("auto");
-  const [keys, setKeys] = useState<Record<ProviderId, string | null>>({
-    groq: null,
-    cerebras: null,
-    openrouter: null,
-    gemini: null,
-  });
-  const [customModels, setCustomModels] = useState<Record<ProviderId, string | null>>({
-    groq: null,
-    cerebras: null,
-    openrouter: null,
-    gemini: null,
-  });
+  const [keys, setKeys] = useState<Record<ProviderId, string | null>>(INITIAL_KEYS);
+  const [customModels, setCustomModels] = useState<Record<ProviderId, string | null>>(INITIAL_MODELS);
 
   // Modal edit state
   const [editingProvider, setEditingProvider] = useState<AIProviderDefinition | null>(null);
@@ -65,23 +81,21 @@ export function AISettingsScreen() {
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
+      // Synchronize latest encrypted keys from Supabase Vault if authenticated
+      await syncAIKeysFromCloud();
+
       const mode = await getPreferredMode();
       setPreferredModeState(mode);
 
-      const loadedKeys: Record<ProviderId, string | null> = {
-        groq: await getApiKey("groq"),
-        cerebras: await getApiKey("cerebras"),
-        openrouter: await getApiKey("openrouter"),
-        gemini: await getApiKey("gemini"),
-      };
-      setKeys(loadedKeys);
+      const loadedKeys: Record<ProviderId, string | null> = { ...INITIAL_KEYS };
+      const loadedModels: Record<ProviderId, string | null> = { ...INITIAL_MODELS };
 
-      const loadedModels: Record<ProviderId, string | null> = {
-        groq: await getCustomModel("groq"),
-        cerebras: await getCustomModel("cerebras"),
-        openrouter: await getCustomModel("openrouter"),
-        gemini: await getCustomModel("gemini"),
-      };
+      for (const p of PROVIDER_LIST) {
+        loadedKeys[p.id] = await getApiKey(p.id);
+        loadedModels[p.id] = await getCustomModel(p.id);
+      }
+
+      setKeys(loadedKeys);
       setCustomModels(loadedModels);
     } finally {
       setLoading(false);
@@ -96,6 +110,7 @@ export function AISettingsScreen() {
     const mode = value as PreferredMode;
     setPreferredModeState(mode);
     await setPreferredMode(mode);
+    void syncAIPreferencesToCloud(mode);
   };
 
   const handleOpenEdit = (provider: AIProviderDefinition) => {
@@ -118,6 +133,7 @@ export function AISettingsScreen() {
     if (!editingProvider) return;
     await setApiKey(editingProvider.id, inputKey);
     await setCustomModel(editingProvider.id, inputModel);
+    await syncAIKeyToCloud(editingProvider.id, inputKey, inputModel);
     await loadSettings();
     handleCloseEdit();
   };
@@ -133,6 +149,7 @@ export function AISettingsScreen() {
     if (!ok) return;
     await deleteApiKey(providerId);
     await setCustomModel(providerId, null);
+    await deleteAIKeyFromCloud(providerId);
     await loadSettings();
   };
 
@@ -149,7 +166,7 @@ export function AISettingsScreen() {
       if (result.ok) {
         setModalTestResult({
           ok: true,
-          message: `Conexión verificada exitosamente (${result.modelUsed})`,
+          message: `Conexión verificada exitosamente (${result.modelUsed}). Tocá "Guardar" para almacenar la clave.`,
         });
       } else {
         setModalTestResult({
@@ -211,27 +228,42 @@ export function AISettingsScreen() {
             Define cómo la aplicación procesa los comandos dictados por voz.
           </Text>
 
-          <SegmentedButtons
-            value={preferredMode}
-            onValueChange={handleModeChange}
-            buttons={[
-              { value: "auto", label: "Auto", showSelectedCheck: false },
-              { value: "groq", label: "Groq", showSelectedCheck: false },
-              { value: "cerebras", label: "Cerebras", showSelectedCheck: false },
-              { value: "openrouter", label: "OpenRouter", showSelectedCheck: false },
-              { value: "gemini", label: "Gemini", showSelectedCheck: false },
-              { value: "heuristic", label: "Offline", showSelectedCheck: false },
-            ]}
-            style={styles.segmentedButtons}
-          />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.segmentedScroll}
+          >
+            <SegmentedButtons
+              value={preferredMode}
+              onValueChange={handleModeChange}
+              buttons={[
+                { value: "auto", label: "Auto", showSelectedCheck: false },
+                { value: "groq", label: "Groq", showSelectedCheck: false },
+                { value: "cerebras", label: "Cerebras", showSelectedCheck: false },
+                { value: "sambanova", label: "SambaNova", showSelectedCheck: false },
+                { value: "mistral", label: "Mistral", showSelectedCheck: false },
+                { value: "ollama", label: "Ollama", showSelectedCheck: false },
+                { value: "openrouter", label: "OpenRouter", showSelectedCheck: false },
+                { value: "gemini", label: "Gemini", showSelectedCheck: false },
+                { value: "heuristic", label: "Offline", showSelectedCheck: false },
+              ]}
+              style={styles.segmentedButtons}
+            />
+          </ScrollView>
 
           <HelperText type="info" visible>
             {preferredMode === "auto" &&
-              "Intenta en orden de velocidad y cuota gratuita (Groq → Cerebras → OpenRouter → Gemini). Si fallan, avisa para revisar la clave."}
+              "Intenta en orden de velocidad y cuota gratuita (Groq → Cerebras → SambaNova → Mistral → Ollama → OpenRouter → Gemini). Si fallan, avisa para revisar la clave."}
             {preferredMode === "groq" &&
               `Fuerza el uso de Groq Cloud (${customModels.groq || AI_PROVIDERS.groq.defaultModel}).`}
             {preferredMode === "cerebras" &&
               `Fuerza el uso de Cerebras Cloud (${customModels.cerebras || AI_PROVIDERS.cerebras.defaultModel}).`}
+            {preferredMode === "sambanova" &&
+              `Fuerza el uso de SambaNova Cloud (${customModels.sambanova || AI_PROVIDERS.sambanova.defaultModel}).`}
+            {preferredMode === "mistral" &&
+              `Fuerza el uso de Mistral AI (${customModels.mistral || AI_PROVIDERS.mistral.defaultModel}).`}
+            {preferredMode === "ollama" &&
+              `Fuerza el uso de Ollama (${customModels.ollama || AI_PROVIDERS.ollama.defaultModel}).`}
             {preferredMode === "openrouter" &&
               `Fuerza el uso de OpenRouter (${customModels.openrouter || AI_PROVIDERS.openrouter.defaultModel}).`}
             {preferredMode === "gemini" &&
@@ -432,8 +464,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
+  segmentedScroll: {
+    paddingVertical: spacing.xs,
+  },
   segmentedButtons: {
     marginVertical: spacing.xs,
+    minWidth: 640,
   },
   providersSection: {
     gap: spacing.xs,

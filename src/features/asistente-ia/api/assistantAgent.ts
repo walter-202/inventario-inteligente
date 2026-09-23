@@ -53,8 +53,9 @@ export function buildAssistantInstructions(scope: AssistantScopeContext): string
     "Si propose_sale o search_products devuelven candidatos, no preguntes el SKU: la app muestra el selector. Solo pedí un nombre más claro si la tool no encontró nada.",
     "Si el usuario corrige una cantidad (por ejemplo \"sino 5\"), usá el producto del historial.",
     "Si el historial trae \"Código de barras escaneado: <ean>\", ese EAN es codigo_barra. Usalo al registrar o al buscar; no lo pidas de nuevo si el usuario dice que ya te lo pasó.",
-    "Para listar inventario ordenado, pasá orden=asc (menor a mayor) o orden=desc (mayor a menor) a list_inventory.",
-    "Si una tool ya trajo una lista (inventario, stock bajo, búsqueda), no enumeres todos los ítems: la app los muestra en una tarjeta. Respondé en 1 o 2 frases: cuántos hay, sucursal y el criterio de orden.",
+    "Si el usuario pide listar, dictar u ordenar productos ('díctame de menor a mayor', 'de menor a mayor', 'de mayor a menor', 'qué productos hay'), llamá SIEMPRE list_inventory con orden='asc' (menor a mayor stock) o orden='desc' (mayor a menor stock). NUNCA llames list_low_stock para ordenar de menor a mayor.",
+    "Si el usuario pide que le dictes o menciones los productos (ej. 'díctame de menor a mayor'): enumerá en tu texto los primeros 3 a 5 productos con su stock ordenado (ej. '1) Nombre: X u., 2) Nombre: Y u...') y aclará que la lista completa está abajo en pantalla.",
+    "Si no pidieron dictar, no enumeres todos los ítems: la app los muestra en una tarjeta. Respondé en 1 o 2 frases: cuántos hay, sucursal y el criterio de orden.",
   ].join("\n");
 }
 
@@ -129,6 +130,7 @@ export type RunAssistantTurnInput = {
   scope: AssistantScopeContext;
   readApi?: AssistantReadApi;
   onProgress?: (progress: AssistantTurnProgress) => void;
+  abortSignal?: AbortSignal;
 };
 
 type AssistantTools = NonNullable<Parameters<typeof streamText>[0]["tools"]>;
@@ -168,12 +170,21 @@ export function assistantUserFacingError(error: unknown): string {
   return ASSISTANT_PROVIDER_ERROR_MESSAGE;
 }
 
+export function isRetryableAssistantResult(result: ResultadoInterpretacion): boolean {
+  return result.tipo === "aclaracion" && result.retryable === true;
+}
+
 const STREAM_TIMEOUT_MS = 20_000;
 const TURN_STEP_LIMIT = 4;
 
-function startTimeout(ms: number): { controller: AbortController; cancel: () => void } {
+function startTimeout(ms: number, parentSignal?: AbortSignal): { controller: AbortController; cancel: () => void } {
   const controller = new AbortController();
-  const timer = setTimeout(() => {
+  const abortFromParent = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+  if (parentSignal?.aborted) abortFromParent();
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  const timer = controller.signal.aborted ? undefined : setTimeout(() => {
     try {
       // Do not pass an Error as abort reason: Hermes treats it as an uncaught exception.
       controller.abort();
@@ -181,11 +192,18 @@ function startTimeout(ms: number): { controller: AbortController; cancel: () => 
       /* never throw from the timer */
     }
   }, ms);
-  return { controller, cancel: () => clearTimeout(timer) };
+  return {
+    controller,
+    cancel: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    },
+  };
 }
 
 async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoInterpretacion | null> {
   try {
+    if (input.abortSignal.aborted) return null;
     const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
     input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Conectando con el proveedor…"] });
 
@@ -221,13 +239,15 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
     const steps = await awaitMaybe(result.steps, []);
     await awaitMaybe(result.finishReason, undefined);
     const outputs = toolOutputsFromResult({ toolResults, steps });
+    if (input.abortSignal.aborted) {
+      const cancelledError = new Error("Request cancelled");
+      cancelledError.name = "AbortError";
+      input.onFailure?.(cancelledError);
+      return null;
+    }
     // Do not replay a partial or failed request through a second generation call.
-    if (outputs.length === 0 && (streamFailed || input.abortSignal.aborted || !hasUsableTurn(text, outputs))) {
-      if (input.abortSignal.aborted) {
-        const timeoutError = new Error("Request timed out");
-        timeoutError.name = "AbortError";
-        input.onFailure?.(timeoutError);
-      } else if (streamFailed) {
+    if (outputs.length === 0 && (streamFailed || !hasUsableTurn(text, outputs))) {
+      if (streamFailed) {
         input.onFailure?.(streamError);
       }
       return null;
@@ -258,6 +278,7 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
       tipo: "aclaracion",
       mensaje: ASSISTANT_CONFIG_MESSAGE,
       pasosPensamiento: ["Sin clave de IA configurada"],
+      retryable: true,
     };
   }
 
@@ -295,6 +316,12 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
   let lastError: unknown;
 
   for (const resolved of models) {
+    if (input.abortSignal?.aborted) {
+      const cancelledError = new Error("Request cancelled");
+      cancelledError.name = "AbortError";
+      lastError = cancelledError;
+      break;
+    }
     const callBase = {
       resolved,
       instructions: instructionsWithBarcode,
@@ -308,7 +335,7 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
         lastError = error;
       },
     };
-    const streamAttempt = startTimeout(STREAM_TIMEOUT_MS);
+    const streamAttempt = startTimeout(STREAM_TIMEOUT_MS, input.abortSignal);
     try {
       const streamed = await completeTurnWithStream({ ...callBase, abortSignal: streamAttempt.controller.signal });
       if (streamed) return streamed;
@@ -317,11 +344,13 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
     } finally {
       streamAttempt.cancel();
     }
+    if (input.abortSignal?.aborted) break;
   }
 
   return {
     tipo: "aclaracion",
     mensaje: assistantUserFacingError(lastError),
     pasosPensamiento: ["No se pudo completar la consulta con los proveedores configurados"],
+    retryable: true,
   };
 }

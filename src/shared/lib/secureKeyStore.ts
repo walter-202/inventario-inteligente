@@ -1,5 +1,7 @@
-export type ProviderId = "openrouter" | "groq" | "cerebras" | "gemini";
+export type ProviderId = "openrouter" | "groq" | "cerebras" | "gemini" | "mistral" | "ollama" | "sambanova";
 export type PreferredMode = ProviderId | "auto" | "heuristic";
+
+const ALL_PROVIDER_IDS: ProviderId[] = ["groq", "cerebras", "sambanova", "mistral", "ollama", "openrouter", "gemini"];
 
 const KEY_PREFIX = "lidemoda_ai_key_";
 const MODEL_PREFIX = "lidemoda_ai_model_";
@@ -28,11 +30,32 @@ async function getSecureStore() {
   return null;
 }
 
+function getWebStorage(): Storage | null {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch {
+    // Storage access denied or unavailable in current environment
+  }
+  return null;
+}
+
 async function safeGetItem(key: string): Promise<string | null> {
   const store = await getSecureStore();
   if (store) {
     try {
-      return await store.getItemAsync(key);
+      const val = await store.getItemAsync(key);
+      if (val !== null && val !== undefined) return val;
+    } catch {
+      // Fallback to web storage or memory
+    }
+  }
+  const web = getWebStorage();
+  if (web) {
+    try {
+      const val = web.getItem(key);
+      if (val !== null && val !== undefined) return val;
     } catch {
       // Fallback to memory
     }
@@ -47,6 +70,15 @@ async function safeSetItem(key: string, value: string): Promise<void> {
       await store.setItemAsync(key, value);
       return;
     } catch {
+      // Fallback to web storage or memory
+    }
+  }
+  const web = getWebStorage();
+  if (web) {
+    try {
+      web.setItem(key, value);
+      return;
+    } catch {
       // Fallback to memory
     }
   }
@@ -58,6 +90,15 @@ async function safeDeleteItem(key: string): Promise<void> {
   if (store) {
     try {
       await store.deleteItemAsync(key);
+      return;
+    } catch {
+      // Fallback to web storage or memory
+    }
+  }
+  const web = getWebStorage();
+  if (web) {
+    try {
+      web.removeItem(key);
       return;
     } catch {
       // Fallback to memory
@@ -97,8 +138,8 @@ export async function setCustomModel(provider: ProviderId, model: string | null)
 
 export async function getPreferredMode(): Promise<PreferredMode> {
   const val = await safeGetItem(PREF_PROVIDER_KEY);
-  if (val === "auto" || val === "heuristic" || val === "openrouter" || val === "groq" || val === "cerebras" || val === "gemini") {
-    return val;
+  if (val === "auto" || val === "heuristic" || (val && ALL_PROVIDER_IDS.includes(val as ProviderId))) {
+    return val as PreferredMode;
   }
   return "auto";
 }
@@ -119,8 +160,8 @@ export async function getProviderOrder(): Promise<ProviderId[]> {
       // ignore
     }
   }
-  // Default priority: Groq (ultra fast free tier) -> Cerebras (high rate free tier) -> OpenRouter -> Gemini
-  return ["groq", "cerebras", "openrouter", "gemini"];
+  // Default priority: Groq -> Cerebras -> Mistral -> Ollama -> OpenRouter -> Gemini
+  return [...ALL_PROVIDER_IDS];
 }
 
 export async function setProviderOrder(order: ProviderId[]): Promise<void> {
@@ -128,13 +169,20 @@ export async function setProviderOrder(order: ProviderId[]): Promise<void> {
 }
 
 export async function getConfiguredProviders(): Promise<ProviderId[]> {
-  const providers: ProviderId[] = ["groq", "cerebras", "openrouter", "gemini"];
   const configured: ProviderId[] = [];
-  for (const p of providers) {
+  for (const p of ALL_PROVIDER_IDS) {
     const key = await getApiKey(p);
     if (key && key.trim().length > 0) {
       configured.push(p);
     }
   }
   return configured;
+}
+
+export async function clearAllLocalAIKeys(): Promise<void> {
+  for (const p of ALL_PROVIDER_IDS) {
+    await deleteApiKey(p);
+    await setCustomModel(p, null);
+  }
+  await setPreferredMode("auto");
 }
