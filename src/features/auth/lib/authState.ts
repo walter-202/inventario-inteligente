@@ -1,6 +1,47 @@
+import type { Session } from "@supabase/supabase-js";
+import type { AuthState, UserProfile } from "./authTypes";
+
 export interface SessionSyncToken {
   epoch: number;
   userId: string | null;
+}
+
+/**
+ * Keep an authenticated navigator mounted only while the same user's current
+ * profile is being rechecked. Initial resolution and identity changes remain
+ * fail-closed behind the loading route.
+ */
+export function prepareProfileSyncState(
+  previousState: AuthState,
+  session: Session,
+  isSameActiveUser: boolean,
+): AuthState {
+  const userId = session.user.id;
+  const profile =
+    isSameActiveUser && previousState.status === "ready" && previousState.profile?.id === userId
+      ? previousState.profile
+      : null;
+  const isRevalidating = profile !== null;
+
+  return {
+    status: isRevalidating ? "ready" : "loading",
+    session,
+    profile,
+    error: null,
+    blockedReason: null,
+    isRevalidating,
+  };
+}
+
+export function hasAuthorizationScopeChanged(
+  previousProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id"> | null,
+  nextProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id">,
+): boolean {
+  return previousProfile === null || (
+    previousProfile.id !== nextProfile.id ||
+    previousProfile.rol !== nextProfile.rol ||
+    previousProfile.sucursal_id !== nextProfile.sucursal_id
+  );
 }
 
 /**

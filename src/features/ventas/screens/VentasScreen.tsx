@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Link, useFocusEffect } from "expo-router";
 import { ScanBarcode, Search, X } from "lucide-react-native";
@@ -27,6 +27,7 @@ import {
   limpiarProductoPendiente,
   peekLotePendiente,
   peekProductoPendiente,
+  subscribeAuthorizationScopeReset,
   type ItemPendienteVenta,
 } from "../lib/pendienteVenta";
 import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
@@ -57,6 +58,7 @@ function VentasContent() {
   const [pendingStockSnapshot, setPendingStockSnapshot] = useState<InventarioItem[] | null>(null);
   const [lineaBorrada, setLineaBorrada] = useState<{ item: CartItem; index: number } | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const authorizationScopeEpochRef = useRef(0);
   const products = useProductos({ q: deferredSearch || undefined });
   const sales = useVentas(branchId ?? undefined);
   const mutation = useProcesarVenta();
@@ -64,9 +66,31 @@ function VentasContent() {
   const selectedBranch = branchId;
 
   useEffect(() => {
-    const timer = setTimeout(() => setDeferredSearch(search), 300);
+    const scopeEpoch = authorizationScopeEpochRef.current;
+    const timer = setTimeout(() => {
+      if (scopeEpoch === authorizationScopeEpochRef.current) setDeferredSearch(search);
+    }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(
+    () => subscribeAuthorizationScopeReset(() => {
+      authorizationScopeEpochRef.current += 1;
+      setBranchId(null);
+      setSearch("");
+      setDeferredSearch("");
+      setCart([]);
+      setPayment("efectivo");
+      setSummaryVisible(false);
+      setCancelSaleTarget(null);
+      setPendingProduct(null);
+      setPendingBatch(null);
+      setPendingStockSnapshot(null);
+      setLineaBorrada(null);
+      setRefreshError(null);
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!canChangeBranch && activeBranchId !== null) {
@@ -77,6 +101,7 @@ function VentasContent() {
   }, [activeBranchId, branches.data, branchId, canChangeBranch]);
 
   const refreshForScreen = useCallback(async () => {
+    const scopeEpoch = authorizationScopeEpochRef.current;
     setPendingProduct(null);
     setPendingBatch(null);
     setPendingStockSnapshot(null);
@@ -88,6 +113,7 @@ function VentasContent() {
         stock.refetch(),
         sales.refetch(),
       ]);
+      if (scopeEpoch !== authorizationScopeEpochRef.current) return;
 
       if (!branchResult.isSuccess || !stockResult.isSuccess || !Array.isArray(stockResult.data)) {
         setRefreshError("No se pudo actualizar el inventario. El producto escaneado se conservará para reintentar.");
@@ -106,6 +132,7 @@ function VentasContent() {
         if (pendingItems.length > 0) setPendingBatch(pendingItems);
       }
     } catch {
+      if (scopeEpoch !== authorizationScopeEpochRef.current) return;
       setRefreshError("No se pudo actualizar el inventario. El producto escaneado se conservará para reintentar.");
     }
   }, [branches.refetch, sales.refetch, stock.refetch]);
@@ -150,14 +177,17 @@ function VentasContent() {
 
   const handleScanProduct = useCallback(
     async (scannedCode: string) => {
+      const scopeEpoch = authorizationScopeEpochRef.current;
       try {
         const found = await buscarProductoPorCodigo(scannedCode);
+        if (scopeEpoch !== authorizationScopeEpochRef.current) return;
         if (found) {
           addProduct(found);
         } else {
           setSearch(scannedCode);
         }
       } catch {
+        if (scopeEpoch !== authorizationScopeEpochRef.current) return;
         setSearch(scannedCode);
       }
     },

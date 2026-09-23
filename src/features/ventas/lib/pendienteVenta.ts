@@ -7,6 +7,7 @@ export interface ItemPendienteVenta {
 
 let pendiente: Producto | null = null;
 let lotePendiente: ItemPendienteVenta[] = [];
+const authorizationScopeResetListeners = new Set<() => void>();
 
 export function establecerProductoPendiente(producto: Producto) { pendiente = producto; }
 export function peekProductoPendiente() { return pendiente; }
@@ -30,4 +31,15 @@ export function tomarLotePendiente(): ItemPendienteVenta[] {
   const value = peekLotePendiente();
   limpiarLotePendiente();
   return value;
+}
+
+export function subscribeAuthorizationScopeReset(listener: () => void): () => void {
+  authorizationScopeResetListeners.add(listener);
+  return () => authorizationScopeResetListeners.delete(listener);
+}
+
+export function clearAuthorizationScopedSalesState(): void {
+  limpiarProductoPendiente();
+  limpiarLotePendiente();
+  for (const listener of [...authorizationScopeResetListeners]) listener();
 }

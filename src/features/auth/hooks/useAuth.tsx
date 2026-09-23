@@ -3,8 +3,9 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 import { supabase } from "../../../shared/lib/supabase";
 import { AuthProfileError, fetchProfile, getAuthErrorMessage, signInWithPassword, signOut as signOutApi } from "../api/authApi";
-import { clearAuthScopedState } from "../lib/authBoundary";
-import { createSessionSyncController } from "../lib/authState";
+import { clearAuthScopedState, clearAuthorizationScopedState } from "../lib/authBoundary";
+import { createSessionSyncController, hasAuthorizationScopeChanged, prepareProfileSyncState } from "../lib/authState";
+import { syncAIKeysFromCloud } from "../../asistente-ia/lib/aiVaultSync";
 import type { AuthState } from "../lib/authTypes";
 
 interface AuthContextValue extends AuthState {
@@ -23,6 +24,7 @@ function blockedState(session: Session, error: unknown): AuthState {
     profile: null,
     error: profileError?.message ?? "No se pudo cargar el perfil de acceso.",
     blockedReason: profileError?.reason ?? "profile-unavailable",
+    isRevalidating: false,
   };
 }
 
@@ -33,46 +35,57 @@ export function SessionProvider({ children }: PropsWithChildren) {
     profile: null,
     error: null,
     blockedReason: null,
+    isRevalidating: false,
   });
   const stateRef = useRef(state);
   const syncControllerRef = useRef(createSessionSyncController());
   const activeUserRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
+  const commitState = useCallback((nextState: AuthState) => {
+    stateRef.current = nextState;
+    setState(nextState);
+  }, []);
+
+  const updateState = useCallback((update: (previous: AuthState) => AuthState) => {
+    commitState(update(stateRef.current));
+  }, [commitState]);
 
   const synchronizeSession = useCallback(async (session: Session | null) => {
     if (!session) {
       syncControllerRef.current.reset();
       activeUserRef.current = null;
       clearAuthScopedState();
-      setState({ status: "signed-out", session: null, profile: null, error: null, blockedReason: null });
+      commitState({ status: "signed-out", session: null, profile: null, error: null, blockedReason: null, isRevalidating: false });
       return;
     }
 
     const userId = session.user.id;
-    const userChanged = activeUserRef.current !== null && activeUserRef.current !== userId;
+    const isSameActiveUser = activeUserRef.current === userId;
+    const previousState = stateRef.current;
+    const previousProfile =
+      isSameActiveUser && previousState.status === "ready" && previousState.profile?.id === userId
+        ? previousState.profile
+        : null;
+    const userChanged = activeUserRef.current !== null && !isSameActiveUser;
     if (userChanged) clearAuthScopedState();
+    else if (previousProfile === null) clearAuthorizationScopedState();
     activeUserRef.current = userId;
     const token = syncControllerRef.current.begin(userId);
-    setState((previous) => ({
-      status: "loading",
-      session,
-      profile: previous.profile?.id === userId ? previous.profile : null,
-      error: null,
-      blockedReason: null,
-    }));
+    commitState(prepareProfileSyncState(previousState, session, isSameActiveUser));
 
     try {
       const profile = await fetchProfile(userId);
       if (!syncControllerRef.current.isCurrent(token)) return;
-      setState({ status: "ready", session, profile, error: null, blockedReason: null });
+      if (previousProfile && hasAuthorizationScopeChanged(previousProfile, profile)) {
+        clearAuthorizationScopedState();
+      }
+      commitState({ status: "ready", session, profile, error: null, blockedReason: null, isRevalidating: false });
+      void syncAIKeysFromCloud();
     } catch (error) {
       if (!syncControllerRef.current.isCurrent(token)) return;
-      setState(blockedState(session, error));
+      commitState(blockedState(session, error));
     }
-  }, []);
+  }, [commitState]);
 
   useEffect(() => {
     let mounted = true;
@@ -96,13 +109,20 @@ export function SessionProvider({ children }: PropsWithChildren) {
         scheduleSynchronization(session);
         return;
       }
-      if (session) setState((previous) => ({ ...previous, session }));
+      if (session) updateState((previous) => ({ ...previous, session }));
     });
 
     void supabase.auth.getSession().then(({ data, error }) => {
       if (!mounted) return;
       if (error) {
-        setState({ status: "signed-out", session: null, profile: null, error: getAuthErrorMessage(error), blockedReason: null });
+        commitState({
+          status: "signed-out",
+          session: null,
+          profile: null,
+          error: getAuthErrorMessage(error),
+          blockedReason: null,
+          isRevalidating: false,
+        });
         return;
       }
       scheduleSynchronization(data.session);
@@ -112,34 +132,43 @@ export function SessionProvider({ children }: PropsWithChildren) {
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, [synchronizeSession]);
+  }, [commitState, synchronizeSession, updateState]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    setState((previous) => ({ ...previous, status: "loading", error: null, blockedReason: null }));
+    updateState((previous) => ({ ...previous, status: "loading", error: null, blockedReason: null, isRevalidating: false }));
     try {
       const { session } = await signInWithPassword({ email, password });
       await synchronizeSession(session);
     } catch (error) {
       clearAuthScopedState();
-      setState({ status: "signed-out", session: null, profile: null, error: getAuthErrorMessage(error), blockedReason: null });
+      activeUserRef.current = null;
+      syncControllerRef.current.reset();
+      commitState({
+        status: "signed-out",
+        session: null,
+        profile: null,
+        error: getAuthErrorMessage(error),
+        blockedReason: null,
+        isRevalidating: false,
+      });
       throw error;
     }
-  }, [synchronizeSession]);
+  }, [commitState, synchronizeSession, updateState]);
 
   const signOut = useCallback(async () => {
     syncControllerRef.current.reset();
     activeUserRef.current = null;
     clearAuthScopedState();
-    setState({ status: "signed-out", session: null, profile: null, error: null, blockedReason: null });
+    commitState({ status: "signed-out", session: null, profile: null, error: null, blockedReason: null, isRevalidating: false });
     try {
       await signOutApi();
     } catch (error) {
       // Keep the UI fail-closed even if the network cannot revoke the remote
       // session. Supabase's local persisted session is removed on success.
-      setState((previous) => ({ ...previous, error: getAuthErrorMessage(error) }));
+      updateState((previous) => ({ ...previous, error: getAuthErrorMessage(error) }));
       throw error;
     }
-  }, []);
+  }, [commitState, updateState]);
 
   const retryProfile = useCallback(async () => {
     const session = stateRef.current.session;

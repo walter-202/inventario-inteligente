@@ -36,4 +36,5 @@ export interface AuthState {
   profile: UserProfile | null;
   error: string | null;
   blockedReason: AuthBlockedReason | null;
+  isRevalidating: boolean;
 }
