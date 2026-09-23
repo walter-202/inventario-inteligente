@@ -44,6 +44,23 @@ export function hasAuthorizationScopeChanged(
   );
 }
 
+export function runIfCurrentAuthorizationScope(
+  capturedScopeEpoch: number,
+  currentScopeEpoch: number,
+  effect: () => void,
+): void {
+  if (capturedScopeEpoch !== currentScopeEpoch) return;
+  effect();
+}
+
+export function getCurrentAuthorizationScopeValue<T>(
+  capturedScopeEpoch: number | null,
+  currentScopeEpoch: number,
+  value: T | null | undefined,
+): T | null {
+  return capturedScopeEpoch === currentScopeEpoch ? value ?? null : null;
+}
+
 /**
  * Keeps an async profile lookup from installing data after a newer auth event.
  * Auth events can arrive in quick succession during refresh, sign-out, or user

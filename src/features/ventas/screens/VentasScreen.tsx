@@ -32,6 +32,7 @@ import {
 } from "../lib/pendienteVenta";
 import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 import { useAuth } from "../../auth/hooks/useAuth";
+import { getCurrentAuthorizationScopeValue, runIfCurrentAuthorizationScope } from "../../auth/lib/authState";
 import { can } from "../../auth/lib/permissions";
 import { PermissionDenied } from "../../auth/components/PermissionDenied";
 
@@ -58,6 +59,7 @@ function VentasContent() {
   const [pendingStockSnapshot, setPendingStockSnapshot] = useState<InventarioItem[] | null>(null);
   const [lineaBorrada, setLineaBorrada] = useState<{ item: CartItem; index: number } | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [mutationErrorScopeEpoch, setMutationErrorScopeEpoch] = useState<number | null>(null);
   const authorizationScopeEpochRef = useRef(0);
   const products = useProductos({ q: deferredSearch || undefined });
   const sales = useVentas(branchId ?? undefined);
@@ -88,6 +90,7 @@ function VentasContent() {
       setPendingStockSnapshot(null);
       setLineaBorrada(null);
       setRefreshError(null);
+      setMutationErrorScopeEpoch(null);
     }),
     [],
   );
@@ -295,6 +298,7 @@ function VentasContent() {
 
   const confirm = () => {
     if (!selectedBranch || !cart.length) return;
+    const saleScopeEpoch = authorizationScopeEpochRef.current;
 
     mutation.mutate(
       {
@@ -304,20 +308,31 @@ function VentasContent() {
       },
       {
         onSuccess: () => {
-          setSummaryVisible(false);
-          setCart([]);
-          Alert.alert("Venta registrada", "La venta se registró correctamente.");
+          runIfCurrentAuthorizationScope(saleScopeEpoch, authorizationScopeEpochRef.current, () => {
+            setSummaryVisible(false);
+            setCart([]);
+            Alert.alert("Venta registrada", "La venta se registró correctamente.");
+          });
         },
-        onError: (error) =>
-          Alert.alert("No se pudo registrar la venta", extraerMensajeError(error, "Intentá nuevamente.")),
+        onError: (error) => {
+          runIfCurrentAuthorizationScope(saleScopeEpoch, authorizationScopeEpochRef.current, () => {
+            setMutationErrorScopeEpoch(saleScopeEpoch);
+            Alert.alert("No se pudo registrar la venta", extraerMensajeError(error, "Intentá nuevamente."));
+          });
+        },
       },
     );
   };
 
   const branchName = branches.data?.find((branch) => branch.id === selectedBranch)?.nombre ?? "";
   const results = deferredSearch.trim() ? products.data : [];
-  const mutationError = mutation.error
-    ? extraerMensajeError(mutation.error, "No se pudo registrar la venta.")
+  const currentMutationError = getCurrentAuthorizationScopeValue(
+    mutationErrorScopeEpoch,
+    authorizationScopeEpochRef.current,
+    mutation.error,
+  );
+  const mutationError = currentMutationError
+    ? extraerMensajeError(currentMutationError, "No se pudo registrar la venta.")
     : null;
 
   const handleConfirmAnulacion = async (motivo: string) => {

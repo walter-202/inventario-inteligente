@@ -190,6 +190,76 @@ test("authorization-scope cleanup also resets the mounted sales screen before re
   assert.match(salesScreen, /if \(scopeEpoch !== authorizationScopeEpochRef\.current\) return/);
 });
 
+test("late sale success from an old authorization scope cannot clear a new-scope cart", () => {
+  const { runIfCurrentAuthorizationScope } = loadTsModule("src/features/auth/lib/authState.ts");
+  let currentScopeEpoch = 4;
+  const saleScopeEpoch = 3;
+  const cart = [{ productId: "new-scope-product" }];
+  let successNoticeShown = false;
+
+  runIfCurrentAuthorizationScope(saleScopeEpoch, currentScopeEpoch, () => {
+    cart.length = 0;
+    successNoticeShown = true;
+  });
+
+  assert.deepEqual(cart, [{ productId: "new-scope-product" }]);
+  assert.equal(successNoticeShown, false);
+
+  const salesScreen = readFileSync(join(root, "src", "features", "ventas", "screens", "VentasScreen.tsx"), "utf8");
+  const confirm = salesScreen.slice(salesScreen.indexOf("const confirm = () => {"), salesScreen.indexOf("const branchName"));
+
+  assert.match(confirm, /const saleScopeEpoch = authorizationScopeEpochRef\.current/);
+  assert.match(
+    confirm,
+    /onSuccess: \(\) => \{\s*runIfCurrentAuthorizationScope\(saleScopeEpoch, authorizationScopeEpochRef\.current, \(\) => \{[\s\S]*?setSummaryVisible\(false\);[\s\S]*?setCart\(\[\]\);[\s\S]*?Alert\.alert\([\s\S]*?\);\s*\}\);\s*\}/,
+  );
+});
+
+test("late sale failure from an old authorization scope does not show a stale alert", () => {
+  const { runIfCurrentAuthorizationScope } = loadTsModule("src/features/auth/lib/authState.ts");
+  const currentScopeEpoch = 8;
+  const saleScopeEpoch = 7;
+  const alerts = [];
+
+  runIfCurrentAuthorizationScope(saleScopeEpoch, currentScopeEpoch, () => alerts.push("old-scope failure"));
+  assert.deepEqual(alerts, []);
+
+  runIfCurrentAuthorizationScope(currentScopeEpoch, currentScopeEpoch, () => alerts.push("current-scope failure"));
+  assert.deepEqual(alerts, ["current-scope failure"]);
+
+  const salesScreen = readFileSync(join(root, "src", "features", "ventas", "screens", "VentasScreen.tsx"), "utf8");
+  const confirm = salesScreen.slice(salesScreen.indexOf("const confirm = () => {"), salesScreen.indexOf("const branchName"));
+
+  assert.match(
+    confirm,
+    /onError: \(error\) => \{\s*runIfCurrentAuthorizationScope\(saleScopeEpoch, authorizationScopeEpochRef\.current, \(\) => \{[\s\S]*?Alert\.alert\([\s\S]*?extraerMensajeError\(error[\s\S]*?\);\s*\}\);\s*\}/,
+  );
+});
+
+test("sale mutation errors render only in the authorization scope that produced them", () => {
+  const { getCurrentAuthorizationScopeValue } = loadTsModule("src/features/auth/lib/authState.ts");
+  const oldScopeError = new Error("Old-scope failure");
+
+  assert.equal(getCurrentAuthorizationScopeValue(6, 7, oldScopeError), null);
+  assert.equal(getCurrentAuthorizationScopeValue(7, 7, oldScopeError), oldScopeError);
+  assert.equal(getCurrentAuthorizationScopeValue(null, 7, oldScopeError), null);
+
+  const salesScreen = readFileSync(join(root, "src", "features", "ventas", "screens", "VentasScreen.tsx"), "utf8");
+  const confirm = salesScreen.slice(salesScreen.indexOf("const confirm = () => {"), salesScreen.indexOf("const branchName"));
+  const mutationError = salesScreen.slice(
+    salesScreen.indexOf("const currentMutationError ="),
+    salesScreen.indexOf("const handleConfirmAnulacion"),
+  );
+
+  assert.match(salesScreen, /const \[mutationErrorScopeEpoch, setMutationErrorScopeEpoch\] = useState<number \| null>\(null\)/);
+  assert.match(salesScreen, /setMutationErrorScopeEpoch\(null\)/);
+  assert.match(confirm, /setMutationErrorScopeEpoch\(saleScopeEpoch\)/);
+  assert.match(
+    mutationError,
+    /getCurrentAuthorizationScopeValue\(\s*mutationErrorScopeEpoch,\s*authorizationScopeEpochRef\.current,\s*mutation\.error,?\s*\)/,
+  );
+});
+
 test("restricted access navigation backs in-stack and replaces direct links with authenticated home", () => {
   const { getPermissionDeniedNavigation } = loadTsModule(
     "src/features/auth/lib/restrictedAccessNavigation.ts",
