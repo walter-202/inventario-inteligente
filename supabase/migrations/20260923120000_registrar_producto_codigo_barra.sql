@@ -1,0 +1,2 @@
+-- Persist optional barcode/subcategory during catalog registration.
+-- Superseded by 20260923130000_fix_registrar_producto_overloads.sql for production cleanup.

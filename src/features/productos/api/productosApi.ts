@@ -24,6 +24,63 @@ const productInputSchema = z.object({
 
 export const ProductoInputSchema = productInputSchema;
 
+type RegistrarProductoRpcPayload = {
+  p_nombre: string;
+  p_codigo: string;
+  p_categoria: string;
+  p_precio: number;
+  p_cantidad: number;
+  p_sucursal_id: number;
+  p_codigo_barra: string | null;
+  p_subcategoria: string | null;
+};
+
+type RegistrarProductoRpcPayloadV7 = Omit<RegistrarProductoRpcPayload, "p_subcategoria">;
+
+function buildRegistrarProductoPayloadV7(input: z.infer<typeof productInputSchema>): RegistrarProductoRpcPayloadV7 {
+  return {
+    p_nombre: input.nombre,
+    p_codigo: input.codigo,
+    p_categoria: input.categoria,
+    p_precio: input.precio,
+    p_cantidad: input.cantidad,
+    p_sucursal_id: input.sucursal_id,
+    p_codigo_barra: input.codigo_barra?.trim() || null,
+  };
+}
+
+function buildRegistrarProductoPayloadV8(input: z.infer<typeof productInputSchema>): RegistrarProductoRpcPayload {
+  return {
+    ...buildRegistrarProductoPayloadV7(input),
+    p_subcategoria: input.subcategoria?.trim() || null,
+  };
+}
+
+function shouldRetryRegistrarProductoRpc(error: { message?: string } | null): boolean {
+  const message = error?.message?.toLowerCase() ?? "";
+  return message.includes("could not find the function")
+    || message.includes("could not choose the best candidate function");
+}
+
+function mapRegistrarProductoError(error: { code?: string; message?: string }): Error {
+  const message = error.message ?? "No se pudo registrar el producto.";
+  if (error.code === "23505" || message.includes("unique")) {
+    return new Error("El código ingresado ya existe. Ingresa un código diferente.");
+  }
+  if (message.includes("ROLE_NOT_ALLOWED")) {
+    return new Error("Tu rol no puede registrar productos. Solo el rol Almacén puede dar de alta en catálogo.");
+  }
+  if (message.includes("BRANCH_NOT_ALLOWED")) {
+    return new Error("No podés registrar stock inicial en esa sucursal con tu usuario actual.");
+  }
+  if (message.includes("Could not choose the best candidate function")) {
+    return new Error(
+      "La base de datos tiene funciones duplicadas para registrar productos. Ejecutá la migración más reciente con supabase db push.",
+    );
+  }
+  return new Error(message);
+}
+
 export async function obtenerProductos(params: ProductosParams = {}): Promise<ProductosRespuesta> {
   const page = params.page && params.page > 0 ? params.page : 1;
   const perPage = 15;
@@ -56,21 +113,12 @@ export async function obtenerProductos(params: ProductosParams = {}): Promise<Pr
 
 export async function registrarProducto(params: NuevoProductoParams): Promise<ProductoRegistrado> {
   const input = productInputSchema.parse(params);
-  const { data, error } = await supabase.rpc("registrar_producto_con_stock", {
-    p_nombre: input.nombre,
-    p_codigo: input.codigo,
-    p_categoria: input.categoria,
-    p_precio: input.precio,
-    p_cantidad: input.cantidad,
-    p_sucursal_id: input.sucursal_id,
-    p_codigo_barra: input.codigo_barra ?? null,
-  } as any);
-  if (error) {
-    if (error.code === "23505" || error.message.includes("unique")) {
-      throw new Error("El código ingresado ya existe. Ingresa un código diferente.");
-    }
-    throw new Error(error.message);
+  let response = await supabase.rpc("registrar_producto_con_stock", buildRegistrarProductoPayloadV8(input));
+  if (response.error && shouldRetryRegistrarProductoRpc(response.error)) {
+    response = await supabase.rpc("registrar_producto_con_stock", buildRegistrarProductoPayloadV7(input));
   }
+  const { data, error } = response;
+  if (error) throw mapRegistrarProductoError(error);
   return data as unknown as ProductoRegistrado;
 }
 

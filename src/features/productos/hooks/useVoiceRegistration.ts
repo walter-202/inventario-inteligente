@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PermissionResponse } from "expo-modules-core";
 import { APP_LOCALE } from "../../../shared/lib/constants";
 import {
@@ -32,6 +32,33 @@ export function useVoiceRegistration() {
   const [state, setState] = useState<VoiceRegistrationState>("idle");
   const [result, setResult] = useState<RegistroProductoParsed | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const transcriptRef = useRef("");
+  const interpretationInFlightRef = useRef(false);
+  const listeningRef = useRef(false);
+
+  const runInterpretation = useCallback(async (phrase: string) => {
+    const trimmed = phrase.trim();
+    if (!trimmed || interpretationInFlightRef.current) return null;
+
+    interpretationInFlightRef.current = true;
+    setError(null);
+    setTranscript(trimmed);
+    transcriptRef.current = trimmed;
+    setState("interpreting");
+
+    try {
+      const parsed = await interpretarRegistroProducto(trimmed);
+      setResult(parsed);
+      setState("done");
+      return parsed;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo interpretar el dictado. Intentá de nuevo.");
+      setState("error");
+      return null;
+    } finally {
+      interpretationInFlightRef.current = false;
+    }
+  }, []);
 
   // Load permission on mount
   const loadPermission = useCallback(async () => {
@@ -74,9 +101,12 @@ export function useVoiceRegistration() {
   // Speech recognition events (no-op en Expo Go)
   useSpeechRecognitionEventSafe("result", (event) => {
     const value = event.results?.[0]?.transcript ?? "";
-    if (value) setTranscript(value);
-    if (event.isFinal) {
-      setState("interpreting");
+    if (value) {
+      setTranscript(value);
+      transcriptRef.current = value;
+    }
+    if (event.isFinal && value.trim()) {
+      void runInterpretation(value);
     }
   });
 
@@ -88,29 +118,15 @@ export function useVoiceRegistration() {
   });
 
   useSpeechRecognitionEventSafe("end", () => {
-    setState((prev) => (prev === "listening" ? "interpreting" : prev));
+    if (!listeningRef.current) return;
+    listeningRef.current = false;
+    const pending = transcriptRef.current.trim();
+    if (pending) {
+      void runInterpretation(pending);
+      return;
+    }
+    setState("idle");
   });
-
-  // Auto-interpret when transcript changes and state becomes "interpreting"
-  useEffect(() => {
-    if (state !== "interpreting" || !transcript.trim()) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const parsed = await interpretarRegistroProducto(transcript);
-        if (!cancelled) {
-          setResult(parsed);
-          setState("done");
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "No se pudo interpretar el dictado. Intenta de nuevo.");
-          setState("error");
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [state, transcript]);
 
   const startListening = useCallback(async () => {
     setError(null);
@@ -135,7 +151,9 @@ export function useVoiceRegistration() {
       return;
     }
     setTranscript("");
+    transcriptRef.current = "";
     setResult(null);
+    listeningRef.current = true;
     setState("listening");
     try {
       native.start({
@@ -154,29 +172,17 @@ export function useVoiceRegistration() {
   }, [state]);
 
   const reset = useCallback(() => {
+    listeningRef.current = false;
     setState("idle");
     setTranscript("");
+    transcriptRef.current = "";
     setResult(null);
     setError(null);
   }, []);
 
   const interpretPhrase = useCallback(async (phrase: string) => {
-    const trimmed = phrase.trim();
-    if (!trimmed) return null;
-    setError(null);
-    setTranscript(trimmed);
-    setState("interpreting");
-    try {
-      const parsed = await interpretarRegistroProducto(trimmed);
-      setResult(parsed);
-      setState("done");
-      return parsed;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo interpretar el dictado.");
-      setState("error");
-      return null;
-    }
-  }, []);
+    return runInterpretation(phrase);
+  }, [runInterpretation]);
 
   return {
     isAvailable,

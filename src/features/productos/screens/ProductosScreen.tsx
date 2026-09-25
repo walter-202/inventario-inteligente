@@ -10,8 +10,12 @@ import { colors, spacing } from "../../../shared/theme";
 import { ProductCard } from "../components/ProductCard";
 import { useProductos } from "../hooks/useProductos";
 import { useCategoriasProductos } from "../hooks/useCategoriasProductos";
+import { useAuth } from "../../auth/hooks/useAuth";
+import { can } from "../../auth/lib/permissions";
 
 export function ProductosScreen() {
+  const { profile } = useAuth();
+  const canCreateProduct = can(profile?.rol, "products.write");
   const [search, setSearch] = useState("");
   const [deferredSearch, setDeferredSearch] = useState("");
   const [category, setCategory] = useState<string | undefined>();
@@ -58,11 +62,13 @@ export function ProductosScreen() {
         ListHeaderComponent={
           <View>
             <AppHeader title="Productos" subtitle="Catálogo y búsqueda" />
-            <Link href="/registrar-producto" asChild>
-              <Button mode="contained" icon={() => <Plus size={18} color={colors.white} />} style={styles.action}>
-                Registrar producto
-              </Button>
-            </Link>
+            {canCreateProduct ? (
+              <Link href="/registrar-producto" asChild>
+                <Button mode="contained" icon={() => <Plus size={18} color={colors.white} />} style={styles.action}>
+                  Registrar producto
+                </Button>
+              </Link>
+            ) : null}
             <AppSearchbar
               value={search}
               onChangeText={setSearch}

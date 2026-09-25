@@ -13,7 +13,7 @@ import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 
 export function RegistrarProductoScreen() {
   const { profile } = useAuth();
-  if (!can(profile?.rol, "products.write")) return <PermissionDenied message="Solo administración o almacén pueden registrar productos." />;
+  if (!can(profile?.rol, "products.write")) return <PermissionDenied message="Solo el rol Almacén puede registrar productos en el catálogo." />;
   return <RegistrarProductoForm />;
 }
 
