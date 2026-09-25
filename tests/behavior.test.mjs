@@ -276,19 +276,28 @@ test("retired Groq and Cerebras model ids alias to current GPT-OSS replacements"
   assert.equal(describeKeyProviderMismatch("sambanova", "any-key"), null);
 });
 
-test("AI gateway gracefully falls back to heuristic when no API keys are present", async () => {
-  const { completeChatJSON } = loadTsModule("src/features/asistente-ia/lib/aiGateway.ts");
+test("structured AI generation requires configured keys instead of heuristic fallback", async () => {
+  const { deleteApiKey, setPreferredMode } = loadTsModule("src/shared/lib/secureKeyStore.ts");
+  const { generateStructuredOutput, ASSISTANT_CONFIG_MESSAGE } = loadTsModule(
+    "src/features/asistente-ia/lib/aiSdkProviders.ts",
+  );
   const { z } = loadTsModule("node_modules/zod/index.js");
 
-  const schema = z.object({ test: z.string() });
-  const result = await completeChatJSON({
-    systemPrompt: "Test prompt",
-    userMessage: "Test user message",
-    schema,
-  });
+  for (const id of ["groq", "cerebras", "sambanova", "mistral", "ollama", "openrouter", "gemini"]) {
+    await deleteApiKey(id);
+  }
+  await setPreferredMode("auto");
 
-  assert.equal(result.provider, "heuristic");
-  assert.equal(result.data, null);
+  const schema = z.object({ test: z.string() });
+  await assert.rejects(
+    () =>
+      generateStructuredOutput({
+        schema,
+        instructions: "Test prompt",
+        messages: [{ role: "user", content: "Test user message" }],
+      }),
+    (error) => error instanceof Error && error.message === ASSISTANT_CONFIG_MESSAGE,
+  );
 });
 
 test("voice registration requires AI keys and does not parse locally", async () => {
@@ -1194,8 +1203,8 @@ test("list_inventory filters by stock threshold through the read API", async () 
   assert.deepEqual(ascending.productos.map((item) => item.productoId), [2, 1, 3]);
 });
 
-test("AI gateway rejects malformed model JSON instead of throwing or accepting it", () => {
-  const { parseAIJSON } = loadTsModule("src/features/asistente-ia/lib/aiGateway.ts");
+test("AI JSON parser rejects malformed model JSON instead of throwing or accepting it", () => {
+  const { parseAIJSON } = loadTsModule("src/features/asistente-ia/lib/aiSdkProviders.ts");
 
   assert.equal(parseAIJSON("this is not JSON"), null);
   assert.deepEqual(parseAIJSON("```json\n{\"accion\":\"consulta_stock\"}\n```"), { accion: "consulta_stock" });

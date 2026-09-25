@@ -1,7 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText, Output, wrapLanguageModel, type LanguageModel, type ModelMessage } from "ai";
-import type { z } from "zod";
+import { z, type ZodType } from "zod";
 import {
   getApiKey,
   getCustomModel,
@@ -9,7 +9,12 @@ import {
   getProviderOrder,
   type ProviderId,
 } from "../../../shared/lib/secureKeyStore";
-import { AI_PROVIDERS, resolveProviderModel } from "./aiProviders";
+import {
+  AI_PROVIDERS,
+  describeKeyProviderMismatch,
+  resolveProviderModel,
+  type AIProviderDefinition,
+} from "./aiProviders";
 import {
   coerceGenerateToolCallInputs,
   polyfillAbortSignalThrowIfAborted,
@@ -103,8 +108,104 @@ export async function listAssistantModels(): Promise<ResolvedAssistantModel[]> {
   return models;
 }
 
+/**
+ * Parses provider JSON defensively. Invalid or non-object payloads are rejected so
+ * callers can fall back without treating model text as a command.
+ */
+export function parseAIJSON(rawText: string): unknown | null {
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith("```json") || cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  }
+  try {
+    const parsed: unknown = JSON.parse(cleaned);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatConnectionError(
+  provider: AIProviderDefinition,
+  model: string,
+  error: unknown,
+): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/failed to fetch|network request failed/i.test(message)) {
+    return `No se pudo contactar a ${provider.name}. Revisá la red o que la clave sea ${provider.keyPlaceholder}.`;
+  }
+  if (/abort/i.test(message)) {
+    return `Timeout al contactar a ${provider.name}.`;
+  }
+  if (/401|403|unauthorized|invalid.*api.*key/i.test(message)) {
+    return `Clave rechazada por ${provider.name}. Revisá que sea una clave ${provider.keyPlaceholder}.`;
+  }
+  if (/404|not found|decommissioned|does not exist/i.test(message)) {
+    const fallback = provider.defaultModel === model
+      ? (provider.recommendedModels.find((candidate) => candidate !== model) || "un modelo activo")
+      : provider.defaultModel;
+    return `El modelo ${model} ya no está disponible en ${provider.name}. Usá ${fallback} en Ajustes.`;
+  }
+  return message;
+}
+
+const CONNECTION_TEST_SCHEMA = z.object({
+  status: z.string(),
+  echo: z.string().optional(),
+});
+
+export async function testProviderConnection(
+  providerId: ProviderId,
+  apiKey: string,
+  customModel?: string | null,
+): Promise<{ ok: boolean; error?: string; modelUsed?: string }> {
+  const provider = AI_PROVIDERS[providerId];
+  if (!provider) {
+    return { ok: false, error: `Proveedor desconocido: ${providerId}` };
+  }
+
+  const keyMismatch = describeKeyProviderMismatch(providerId, apiKey);
+  if (keyMismatch) {
+    return { ok: false, error: keyMismatch };
+  }
+
+  const modelToUse = resolveProviderModel(providerId, customModel);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+
+  try {
+    const fetchImpl = await resolveFetch();
+    const model = createProviderModel(providerId, apiKey.trim(), modelToUse, fetchImpl);
+    const result = await generateText({
+      model,
+      instructions: "Eres un evaluador de conectividad. Responde en formato JSON.",
+      messages: [{ role: "user", content: 'Devuelve exactamente: {"status":"ok","echo":"test"}' }],
+      output: Output.object({ schema: CONNECTION_TEST_SCHEMA }),
+      abortSignal: controller.signal,
+      maxRetries: 0,
+    });
+    const parsed = CONNECTION_TEST_SCHEMA.safeParse(result.output);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        error: "La respuesta del modelo no siguió el formato esperado.",
+        modelUsed: modelToUse,
+      };
+    }
+    return { ok: true, modelUsed: modelToUse };
+  } catch (error) {
+    return {
+      ok: false,
+      error: formatConnectionError(provider, modelToUse, error),
+      modelUsed: modelToUse,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type StructuredGenerationOptions<T> = {
-  schema: z.ZodType<T>;
+  schema: ZodType<T>;
   instructions: string;
   messages: ModelMessage[];
   timeoutMs?: number;

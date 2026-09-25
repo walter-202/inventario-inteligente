@@ -3,7 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { Button, Card, Chip, HelperText, Text } from "react-native-paper";
 import { CheckCircle2, Key, AlertCircle, PlayCircle, Trash2, Cpu } from "lucide-react-native";
 import type { AIProviderDefinition } from "../../asistente-ia/lib/aiProviders";
-import { testProviderConnection } from "../../asistente-ia/lib/aiGateway";
+import { testProviderConnection } from "../../asistente-ia/lib/aiSdkProviders";
 import { colors, spacing, radius } from "../../../shared/theme";
 
 interface ProviderCardProps {

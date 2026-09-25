@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { completeChatJSON } from "../lib/aiGateway";
 import {
   ASSISTANT_CONFIG_MESSAGE,
-  ASSISTANT_PROVIDER_ERROR_MESSAGE,
+  generateStructuredOutput,
   listAssistantModels,
 } from "../lib/aiSdkProviders";
 
@@ -75,8 +74,7 @@ const INSTRUCTIONS = [
 ].join("\n");
 
 /**
- * Interprets voice text for product registration via direct provider HTTP (json_object).
- * Avoids AI SDK structured output, which is unreliable on Expo/Hermes streams.
+ * Interprets voice text for product registration via the same BYOK AI SDK stack as the assistant.
  */
 export async function interpretarRegistroProducto(texto: string): Promise<RegistroProductoParsed> {
   const phrase = texto.trim();
@@ -87,13 +85,10 @@ export async function interpretarRegistroProducto(texto: string): Promise<Regist
     throw new Error(ASSISTANT_CONFIG_MESSAGE);
   }
 
-  const result = await completeChatJSON({
-    systemPrompt: INSTRUCTIONS,
-    userMessage: `Texto dictado: "${phrase}"`,
+  return generateStructuredOutput({
     schema: RegistroProductoSchema,
+    instructions: INSTRUCTIONS,
+    messages: [{ role: "user", content: `Texto dictado: "${phrase}"` }],
     timeoutMs: 20_000,
   });
-
-  if (result.data) return result.data;
-  throw new Error(ASSISTANT_PROVIDER_ERROR_MESSAGE);
 }

@@ -33,7 +33,7 @@ import {
   describeKeyProviderMismatch,
   type AIProviderDefinition,
 } from "../../asistente-ia/lib/aiProviders";
-import { testProviderConnection } from "../../asistente-ia/lib/aiGateway";
+import { testProviderConnection } from "../../asistente-ia/lib/aiSdkProviders";
 import {
   syncAIKeysFromCloud,
   syncAIKeyToCloud,
