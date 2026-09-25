@@ -74,21 +74,36 @@ export function can(role: Role | null | undefined, ability: Ability): boolean {
   return role ? branchScopeFor(role, ability) !== "none" : false;
 }
 
+export function assignedBranchIds(
+  assignedBranchId: number | null | undefined,
+  assignedBranchIdsList?: number[] | null,
+): number[] {
+  if (assignedBranchIdsList?.length) return assignedBranchIdsList;
+  if (assignedBranchId !== null && assignedBranchId !== undefined) return [assignedBranchId];
+  return [];
+}
+
 export function canUseBranch(
   role: Role | null | undefined,
   ability: Ability,
   requestedBranchId: number | null | undefined,
   assignedBranchId: number | null | undefined,
+  assignedBranchIdsList?: number[] | null,
 ): boolean {
   if (!role) return false;
   const scope = branchScopeFor(role, ability);
   if (scope === "none") return false;
   if (scope === "any" || scope === "aggregate") return true;
-  return requestedBranchId !== null && requestedBranchId !== undefined && requestedBranchId === assignedBranchId;
+  if (requestedBranchId === null || requestedBranchId === undefined) return false;
+  return assignedBranchIds(assignedBranchId, assignedBranchIdsList).includes(requestedBranchId);
 }
 
-export function canSelectBranch(role: Role | null | undefined): boolean {
-  return isGlobalRole(role);
+export function canSelectBranch(
+  role: Role | null | undefined,
+  assignedBranchIdsList?: number[] | null,
+): boolean {
+  if (isGlobalRole(role)) return true;
+  return assignedBranchIds(undefined, assignedBranchIdsList).length > 1;
 }
 
 /** Whether the role operates globally without a fixed branch assignment. */

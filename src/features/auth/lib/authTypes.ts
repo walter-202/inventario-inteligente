@@ -17,7 +17,10 @@ export interface UserProfile {
   email: string | null;
   nombre: string | null;
   rol: Role;
+  /** Primary/default branch kept for backward compatibility. */
   sucursal_id: number | null;
+  /** All branches assigned to this profile. Empty for global roles. */
+  sucursal_ids: number[];
   created_at: string;
   updated_at: string;
 }

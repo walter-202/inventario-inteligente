@@ -34,13 +34,16 @@ export function prepareProfileSyncState(
 }
 
 export function hasAuthorizationScopeChanged(
-  previousProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id"> | null,
-  nextProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id">,
+  previousProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id" | "sucursal_ids"> | null,
+  nextProfile: Pick<UserProfile, "id" | "rol" | "sucursal_id" | "sucursal_ids">,
 ): boolean {
+  const previousBranches = previousProfile?.sucursal_ids?.join(",") ?? "";
+  const nextBranches = nextProfile.sucursal_ids.join(",");
   return previousProfile === null || (
     previousProfile.id !== nextProfile.id ||
     previousProfile.rol !== nextProfile.rol ||
-    previousProfile.sucursal_id !== nextProfile.sucursal_id
+    previousProfile.sucursal_id !== nextProfile.sucursal_id ||
+    previousBranches !== nextBranches
   );
 }
 

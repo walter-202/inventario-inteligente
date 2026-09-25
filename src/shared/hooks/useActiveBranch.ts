@@ -1,34 +1,52 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "../../features/auth/hooks/useAuth";
-import { canSelectBranch, isGlobalRole } from "../../features/auth/lib/permissions";
+import { assignedBranchIds, canSelectBranch, isGlobalRole } from "../../features/auth/lib/permissions";
 
 export function resolveActiveBranchId(
   role: Parameters<typeof canSelectBranch>[0],
   assignedBranchId: number | null | undefined,
   selectedBranchId: number | null | undefined,
+  assignedBranchIdsList?: number[] | null,
 ): number | null {
+  const allowed = assignedBranchIds(assignedBranchId, assignedBranchIdsList);
   if (isGlobalRole(role)) return selectedBranchId ?? null;
-  return assignedBranchId ?? null;
+  if (selectedBranchId !== null && selectedBranchId !== undefined && allowed.includes(selectedBranchId)) {
+    return selectedBranchId;
+  }
+  return assignedBranchId ?? allowed[0] ?? null;
 }
 
-/** The server-assigned branch is authoritative for every non-admin account. */
+/** The server-assigned branches are authoritative for every non-admin account. */
 export function useActiveBranch() {
   const { profile } = useAuth();
-  const canChangeBranch = canSelectBranch(profile?.rol);
+  const allowedBranches = profile?.sucursal_ids ?? assignedBranchIds(profile?.sucursal_id);
+  const canChangeBranch = canSelectBranch(profile?.rol, allowedBranches);
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
 
   useEffect(() => {
-    setSelectedBranchId(isGlobalRole(profile?.rol) ? null : profile?.sucursal_id ?? null);
-  }, [profile?.rol, profile?.sucursal_id]);
+    if (isGlobalRole(profile?.rol)) {
+      setSelectedBranchId(null);
+      return;
+    }
+    setSelectedBranchId(profile?.sucursal_id ?? allowedBranches[0] ?? null);
+  }, [profile?.rol, profile?.sucursal_id, allowedBranches.join(",")]);
 
-  const activeBranchId = resolveActiveBranchId(profile?.rol, profile?.sucursal_id, selectedBranchId);
+  const activeBranchId = resolveActiveBranchId(
+    profile?.rol,
+    profile?.sucursal_id,
+    selectedBranchId,
+    allowedBranches,
+  );
   const selectBranch = useCallback((branchId: number | null) => {
-    if (canChangeBranch) setSelectedBranchId(branchId);
-  }, [canChangeBranch]);
+    if (!canChangeBranch) return;
+    if (branchId !== null && !allowedBranches.includes(branchId)) return;
+    setSelectedBranchId(branchId);
+  }, [allowedBranches, canChangeBranch]);
 
   return {
     activeBranchId,
+    allowedBranchIds: allowedBranches,
     canChangeBranch,
     selectBranch,
     isGlobal: activeBranchId === null && (isGlobalRole(profile?.rol) || profile?.rol === "marketing"),

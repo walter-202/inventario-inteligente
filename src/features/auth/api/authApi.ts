@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { supabase } from "../../../shared/lib/supabase";
 import { ROLE_VALUES, type AuthBlockedReason, type Role, type UserProfile } from "../lib/authTypes";
-import { isGlobalRole } from "../lib/permissions";
+import { isGlobalRole, assignedBranchIds } from "../lib/permissions";
 
 export const SignInSchema = z.object({
   email: z.string().trim().toLowerCase().email("Ingresa un correo válido."),
@@ -19,6 +19,19 @@ const profileSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
+
+async function fetchAssignedBranchIds(userId: string): Promise<number[] | null> {
+  const { data, error } = await supabase
+    .from("perfil_sucursales")
+    .select("sucursal_id")
+    .eq("perfil_id", userId)
+    .order("sucursal_id", { ascending: true });
+
+  // Table missing, not exposed yet, or RLS unavailable: keep legacy single-branch auth.
+  if (error) return null;
+
+  return (data ?? []).map((row) => row.sucursal_id);
+}
 
 export class AuthProfileError extends Error {
   readonly reason: AuthBlockedReason;
@@ -62,9 +75,12 @@ export async function fetchProfile(userId: string): Promise<UserProfile> {
   if (!result.success) throw new AuthProfileError("invalid-profile", "El perfil recibido no es válido.");
 
   const profile = result.data as UserProfile;
+  const junctionBranchIds = await fetchAssignedBranchIds(parsedUserId);
+  profile.sucursal_ids = assignedBranchIds(profile.sucursal_id, junctionBranchIds);
+
   // Only an administrator may be global. Every operational account needs a
   // server-assigned branch; the app never infers one from client state.
-  if (!isGlobalRole(profile.rol) && profile.sucursal_id === null) {
+  if (!isGlobalRole(profile.rol) && profile.sucursal_ids.length === 0) {
     throw new AuthProfileError("unassigned-profile", "Administración todavía no te asignó una sucursal.");
   }
   return profile;

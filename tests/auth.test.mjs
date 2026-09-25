@@ -7,7 +7,7 @@ import { loadTsModule } from "./load-ts.mjs";
 const root = new URL("..", import.meta.url).pathname.replace(/^\/(\w):/, "$1:");
 
 test("role policy keeps admin purely analytical with user management and confines staff to their branch", () => {
-  const { branchScopeFor, can, canUseBranch } = loadTsModule("src/features/auth/lib/permissions.ts");
+  const { branchScopeFor, can, canUseBranch, canSelectBranch, assignedBranchIds } = loadTsModule("src/features/auth/lib/permissions.ts");
 
   // Admin has NO operational mutation abilities (purely analytical + user governance)
   assert.equal(branchScopeFor("admin", "sales.write"), "none");
@@ -27,6 +27,14 @@ test("role policy keeps admin purely analytical with user management and confine
   assert.equal(can(undefined, "sales.write"), false);
   assert.equal(canUseBranch("vendedora", "sales.write", 2, 1), false);
   assert.equal(canUseBranch("vendedora", "sales.write", 1, 1), true);
+  assert.equal(canUseBranch("vendedora", "sales.write", 2, 1, [1, 2]), true);
+  assert.equal(canUseBranch("vendedora", "sales.write", 3, 1, [1, 2]), false);
+  assert.equal(canSelectBranch("vendedora", [1]), false);
+  assert.equal(canSelectBranch("vendedora", [1, 2]), true);
+  assert.equal(canSelectBranch("admin", []), true);
+  assert.deepEqual(assignedBranchIds(1, null), [1]);
+  assert.deepEqual(assignedBranchIds(1, []), [1]);
+  assert.deepEqual(assignedBranchIds(1, [1, 2]), [1, 2]);
   assert.equal(canUseBranch("admin", "dashboard.read", 2, null), true);
   assert.equal(canUseBranch("admin", "sales.write", 2, null), false);
 });
@@ -51,6 +59,7 @@ test("same-user profile revalidation keeps the ready route state and flags prote
     nombre: "A",
     rol: "vendedora",
     sucursal_id: 1,
+    sucursal_ids: [1],
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
   };
@@ -88,13 +97,22 @@ test("same-user profile revalidation keeps the ready route state and flags prote
   assert.equal(sessionAfterSignOut.profile, null);
 });
 
+test("user admin RPCs fall back to legacy signatures when multi-branch migration is missing", () => {
+  const source = readFileSync(join(root, "src/features/auth/api/usersApi.ts"), "utf8");
+  assert.match(source, /isMissingMultiBranchRpc/);
+  assert.match(source, /admin_crear_usuario/);
+  assert.match(source, /p_sucursal_ids: isGlobalRole\(params\.rol\) \? null : params\.sucursalIds/);
+  assert.match(source, /assertLegacySingleBranchSupported/);
+});
+
 test("refreshed role or branch changes invalidate the authorization scope", () => {
   const { hasAuthorizationScopeChanged } = loadTsModule("src/features/auth/lib/authState.ts");
-  const profile = { id: "user-a", rol: "vendedora", sucursal_id: 1 };
+  const profile = { id: "user-a", rol: "vendedora", sucursal_id: 1, sucursal_ids: [1] };
 
   assert.equal(hasAuthorizationScopeChanged(profile, { ...profile }), false);
   assert.equal(hasAuthorizationScopeChanged(profile, { ...profile, rol: "admin" }), true);
   assert.equal(hasAuthorizationScopeChanged(profile, { ...profile, sucursal_id: 2 }), true);
+  assert.equal(hasAuthorizationScopeChanged(profile, { ...profile, sucursal_ids: [1, 2] }), true);
   assert.equal(hasAuthorizationScopeChanged(profile, { ...profile, id: "user-b" }), true);
   assert.equal(hasAuthorizationScopeChanged(null, { ...profile }), true);
 });

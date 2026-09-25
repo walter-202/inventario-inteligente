@@ -1,6 +1,3 @@
-import React from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { Avatar, Divider, Drawer, Text } from "react-native-paper";
 import { usePathname, useRouter } from "expo-router";
 import {
   AlertTriangle,
@@ -9,16 +6,17 @@ import {
   LayoutDashboard,
   LogOut,
   Receipt,
-  Settings,
   Shirt,
   Sparkles,
   TrendingUp,
-  Users,
+  Users
 } from "lucide-react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
+import { Avatar, Divider, Drawer, Text } from "react-native-paper";
 
-import { colors, spacing } from "../theme";
 import { useAuth } from "../../features/auth/hooks/useAuth";
 import { can, roleLabels } from "../../features/auth/lib/permissions";
+import { colors, spacing } from "../theme";
 import { useConfirm } from "./ConfirmDialog";
 import { useAppDrawer } from "./DrawerContext";
 
@@ -109,7 +107,7 @@ export function AppDrawerContent() {
           style={isInventarioActive ? styles.activeItem : styles.item}
         />
         <Drawer.Item
-          label="Catálogo de Prendas"
+          label="Catálogo "
           active={isProductosActive}
           icon={({ color, size }) => <Shirt color={color} size={size} />}
           onPress={() => handleNavigate("/productos")}

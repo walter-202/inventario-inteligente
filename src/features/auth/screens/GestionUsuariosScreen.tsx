@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Button,
   Card,
+  Checkbox,
   Chip,
   Dialog,
   Divider,
@@ -42,7 +43,7 @@ export function GestionUsuariosScreen() {
   // Edit dialog state
   const [editingUser, setEditingUser] = useState<UserProfileItem | null>(null);
   const [selectedRole, setSelectedRole] = useState<Role>("vendedora");
-  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [snackMsg, setSnackMsg] = useState<string | null>(null);
 
@@ -52,7 +53,7 @@ export function GestionUsuariosScreen() {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState<Role>("vendedora");
-  const [newBranchId, setNewBranchId] = useState<number | null>(1);
+  const [newBranchIds, setNewBranchIds] = useState<number[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -81,10 +82,21 @@ export function GestionUsuariosScreen() {
     );
   }
 
+  const toggleBranchSelection = (
+    branchId: number,
+    setter: React.Dispatch<React.SetStateAction<number[]>>,
+  ) => {
+    setter((current) =>
+      current.includes(branchId)
+        ? current.filter((id) => id !== branchId)
+        : [...current, branchId],
+    );
+  };
+
   const openEdit = (u: UserProfileItem) => {
     setEditingUser(u);
     setSelectedRole(u.rol);
-    setSelectedBranchId(u.sucursal_id);
+    setSelectedBranchIds(u.sucursal_ids.length ? u.sucursal_ids : u.sucursal_id ? [u.sucursal_id] : []);
   };
 
   const closeEdit = () => {
@@ -93,10 +105,17 @@ export function GestionUsuariosScreen() {
 
   const handleSave = async () => {
     if (!editingUser) return;
+    if (!isGlobalRole(selectedRole) && selectedBranchIds.length === 0) {
+      setErrorMsg("Seleccioná al menos una sucursal para este rol.");
+      return;
+    }
     try {
       setSaving(true);
-      const branchToSave = isGlobalRole(selectedRole) ? null : selectedBranchId;
-      await updateUserProfile(editingUser.id, selectedRole, branchToSave);
+      await updateUserProfile(
+        editingUser.id,
+        selectedRole,
+        isGlobalRole(selectedRole) ? [] : selectedBranchIds,
+      );
       setSnackMsg(`Rol de ${editingUser.nombre ?? editingUser.email} actualizado a ${roleLabels[selectedRole]}.`);
       closeEdit();
       void loadData();
@@ -112,7 +131,8 @@ export function GestionUsuariosScreen() {
     setNewEmail("");
     setNewPassword("");
     setNewRole("vendedora");
-    setNewBranchId(sucursalesQuery.data?.[0]?.id ?? 1);
+    const defaultBranchId = sucursalesQuery.data?.[0]?.id ?? 1;
+    setNewBranchIds(defaultBranchId ? [defaultBranchId] : []);
     setCreateError(null);
     setIsCreatingUser(true);
   };
@@ -138,6 +158,10 @@ export function GestionUsuariosScreen() {
       setCreateError(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
       return;
     }
+    if (!isGlobalRole(newRole) && newBranchIds.length === 0) {
+      setCreateError("Seleccioná al menos una sucursal para este rol.");
+      return;
+    }
 
     try {
       setCreating(true);
@@ -147,7 +171,7 @@ export function GestionUsuariosScreen() {
         email: cleanEmail,
         password: newPassword || DEFAULT_COLLABORATOR_PASSWORD,
         rol: newRole,
-        sucursalId: isGlobalRole(newRole) ? null : newBranchId,
+        sucursalIds: isGlobalRole(newRole) ? [] : newBranchIds,
       });
 
       setSnackMsg(`Colaborador ${cleanNombre} registrado con éxito.`);
@@ -330,23 +354,21 @@ export function GestionUsuariosScreen() {
                 <>
                   <Divider style={{ marginVertical: spacing.xs }} />
                   <Text variant="titleSmall" style={[styles.sectionTitle, { marginTop: spacing.xs }]}>
-                    Sucursal Asignada:
+                    Sucursales Asignadas:
                   </Text>
-                  <RadioButton.Group
-                    onValueChange={(val) => setNewBranchId(Number(val))}
-                    value={newBranchId ? String(newBranchId) : ""}
-                  >
-                    {sucursalesQuery.data?.map((suc) => (
-                      <View key={suc.id} style={styles.radioRow}>
-                        <RadioButton.Item
-                          label={`${suc.nombre} (${suc.ciudad})`}
-                          value={String(suc.id)}
-                          mode="android"
-                          style={{ paddingVertical: 2 }}
-                        />
-                      </View>
-                    ))}
-                  </RadioButton.Group>
+                  <Text variant="bodySmall" style={[styles.muted, { marginBottom: spacing.xs }]}>
+                    Podés seleccionar una o varias sucursales.
+                  </Text>
+                  {sucursalesQuery.data?.map((suc) => (
+                    <Checkbox.Item
+                      key={suc.id}
+                      label={`${suc.nombre} (${suc.ciudad})`}
+                      status={newBranchIds.includes(suc.id) ? "checked" : "unchecked"}
+                      onPress={() => toggleBranchSelection(suc.id, setNewBranchIds)}
+                      mode="android"
+                      style={{ paddingVertical: 0 }}
+                    />
+                  ))}
                 </>
               )}
             </ScrollView>
@@ -396,23 +418,21 @@ export function GestionUsuariosScreen() {
                   {!isGlobalRole(selectedRole) && (
                     <>
                       <Text variant="titleSmall" style={[styles.sectionTitle, { marginTop: spacing.md }]}>
-                        Sucursal Asignada:
+                        Sucursales Asignadas:
                       </Text>
-                      <RadioButton.Group
-                        onValueChange={(val) => setSelectedBranchId(Number(val))}
-                        value={selectedBranchId ? String(selectedBranchId) : ""}
-                      >
-                        {sucursalesQuery.data?.map((suc) => (
-                          <View key={suc.id} style={styles.radioRow}>
-                            <RadioButton.Item
-                              label={`${suc.nombre} (${suc.ciudad})`}
-                              value={String(suc.id)}
-                              mode="android"
-                              style={{ paddingVertical: 2 }}
-                            />
-                          </View>
-                        ))}
-                      </RadioButton.Group>
+                      <Text variant="bodySmall" style={[styles.muted, { marginBottom: spacing.xs }]}>
+                        Podés seleccionar una o varias sucursales.
+                      </Text>
+                      {sucursalesQuery.data?.map((suc) => (
+                        <Checkbox.Item
+                          key={suc.id}
+                          label={`${suc.nombre} (${suc.ciudad})`}
+                          status={selectedBranchIds.includes(suc.id) ? "checked" : "unchecked"}
+                          onPress={() => toggleBranchSelection(suc.id, setSelectedBranchIds)}
+                          mode="android"
+                          style={{ paddingVertical: 0 }}
+                        />
+                      ))}
                     </>
                   )}
                 </View>
