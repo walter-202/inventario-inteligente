@@ -58,6 +58,7 @@ import { ChatComposer } from "../components/ChatComposer";
 import { SessionBar } from "../components/SessionBar";
 import { SessionDrawer } from "../components/SessionDrawer";
 import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
+import { establecerRegistroPendiente } from "../../productos/lib/pendienteRegistro";
 import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
 
 type LineaConStock = LineaInterpretada & { available: number };
@@ -999,9 +1000,27 @@ export function VoiceCommandView() {
     );
   };
 
-  const abrirFormularioAlta = () => {
+  const abrirFormularioAlta = (input: RegistroProductoParsed) => {
     limpiarPropuestaRegistro();
-    router.push("/registrar-producto");
+    establecerRegistroPendiente({
+      nombre: input.nombre,
+      codigo: input.codigo,
+      codigo_barra: input.codigo_barra,
+      categoria: input.categoria,
+      precio: input.precio,
+      cantidad: input.cantidad,
+    });
+    router.push({
+      pathname: "/registrar-producto",
+      params: {
+        ...(input.nombre ? { nombre: input.nombre } : {}),
+        ...(input.codigo ? { codigo: input.codigo } : {}),
+        ...(input.codigo_barra ? { codigo_barra: input.codigo_barra } : {}),
+        ...(input.categoria ? { categoria: input.categoria } : {}),
+        ...(input.precio != null ? { precio: String(input.precio) } : {}),
+        ...(input.cantidad != null ? { cantidad: String(input.cantidad) } : {}),
+      },
+    });
   };
 
   const cancelarConfirmacion = () => {

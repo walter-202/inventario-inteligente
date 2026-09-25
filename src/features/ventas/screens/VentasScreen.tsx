@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
-import { Link, useFocusEffect } from "expo-router";
+import { Link, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ScanBarcode, Search, X } from "lucide-react-native";
 import { Button, Card, Chip, HelperText, Snackbar, Text } from "react-native-paper";
 
@@ -14,7 +14,8 @@ import type { InventarioItem, PaymentMethod, Producto, VentaResumen } from "../.
 import { useSucursales } from "../../../shared/hooks/useSucursales";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
 import { useProductos } from "../../productos/hooks/useProductos";
-import { buscarProductoPorCodigo } from "../../productos/api/productosApi";
+import { buscarProductoPorCodigo, buscarProductoPorId } from "../../productos/api/productosApi";
+import { unwrapRouteParamNumber } from "../../../shared/lib/routeParams";
 import { PaymentSelector } from "../components/PaymentSelector";
 import { SaleCart, type CartItem } from "../components/SaleCart";
 import { SaleSummaryModal } from "../components/SaleSummaryModal";
@@ -43,6 +44,8 @@ export function VentasScreen() {
 }
 
 function VentasContent() {
+  const { producto_id: productoIdParamRaw } = useLocalSearchParams<{ producto_id?: string }>();
+  const productoIdParam = unwrapRouteParamNumber(productoIdParamRaw);
   const { profile } = useAuth();
   const { activeBranchId, canChangeBranch, selectBranch } = useActiveBranch();
   const branches = useSucursales();
@@ -61,6 +64,7 @@ function VentasContent() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mutationErrorScopeEpoch, setMutationErrorScopeEpoch] = useState<number | null>(null);
   const authorizationScopeEpochRef = useRef(0);
+  const consumedProductoIdRef = useRef<number | null>(null);
   const products = useProductos({ q: deferredSearch || undefined });
   const sales = useVentas(branchId ?? undefined);
   const mutation = useProcesarVenta();
@@ -105,9 +109,6 @@ function VentasContent() {
 
   const refreshForScreen = useCallback(async () => {
     const scopeEpoch = authorizationScopeEpochRef.current;
-    setPendingProduct(null);
-    setPendingBatch(null);
-    setPendingStockSnapshot(null);
     setRefreshError(null);
 
     try {
@@ -131,9 +132,14 @@ function VentasContent() {
       const pendingItems = peekLotePendiente();
       if (pending || pendingItems.length > 0) {
         setPendingStockSnapshot(stockResult.data);
-        if (pending) setPendingProduct(pending);
-        if (pendingItems.length > 0) setPendingBatch(pendingItems);
+        setPendingProduct(pending);
+        setPendingBatch(pendingItems.length > 0 ? pendingItems : null);
+        return;
       }
+
+      setPendingProduct(null);
+      setPendingBatch(null);
+      setPendingStockSnapshot(null);
     } catch {
       if (scopeEpoch !== authorizationScopeEpochRef.current) return;
       setRefreshError("No se pudo actualizar el inventario. El producto escaneado se conservará para reintentar.");
@@ -233,9 +239,10 @@ function VentasContent() {
     if ((!pendingProduct && (!pendingBatch || pendingBatch.length === 0)) || !pendingStockSnapshot || selectedBranch === null) return;
 
     if (pendingProduct) {
-      addProduct(pendingProduct, pendingStockSnapshot);
-      if (peekProductoPendiente()?.id === pendingProduct.id) {
+      const added = addProduct(pendingProduct, pendingStockSnapshot);
+      if (added && peekProductoPendiente()?.id === pendingProduct.id) {
         limpiarProductoPendiente();
+        consumedProductoIdRef.current = pendingProduct.id;
       }
       setPendingProduct(null);
     }
@@ -249,6 +256,29 @@ function VentasContent() {
     setPendingStockSnapshot(null);
   }, [addProduct, addProductsBatch, pendingProduct, pendingBatch, pendingStockSnapshot, selectedBranch]);
 
+  useEffect(() => {
+    if (!productoIdParam || selectedBranch === null || consumedProductoIdRef.current === productoIdParam) return;
+    if (cart.some((item) => item.producto.id === productoIdParam)) {
+      consumedProductoIdRef.current = productoIdParam;
+      return;
+    }
+
+    const pending = peekProductoPendiente();
+    if (pending?.id === productoIdParam) return;
+
+    const scopeEpoch = authorizationScopeEpochRef.current;
+    void (async () => {
+      try {
+        const product = await buscarProductoPorId(productoIdParam);
+        if (scopeEpoch !== authorizationScopeEpochRef.current) return;
+        if (addProduct(product)) {
+          consumedProductoIdRef.current = productoIdParam;
+        }
+      } catch {
+        // El singleton o un reintento manual cubren el caso si falla la carga por id.
+      }
+    })();
+  }, [addProduct, cart, productoIdParam, selectedBranch]);
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.producto.precio * item.cantidad, 0),

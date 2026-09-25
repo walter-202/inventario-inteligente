@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { Button, Dialog, HelperText, Portal, Text, TextInput } from "react-native-paper";
+import { Button, Dialog, HelperText, Text, TextInput } from "react-native-paper";
+import { AppModalOverlay } from "../../../shared/components/AppModalOverlay";
 import { AlertTriangle } from "lucide-react-native";
 import { colors, spacing } from "../../../shared/theme";
 import { formatearFechaHora, formatearPrecio } from "../../../shared/lib/utils";
@@ -49,7 +50,7 @@ export function SaleCancelDialog({
   if (!sale) return null;
 
   return (
-    <Portal>
+    <AppModalOverlay visible={visible} onDismiss={handleDismiss}>
       <Dialog visible={visible} onDismiss={handleDismiss} style={styles.dialog}>
         <Dialog.Title style={styles.title}>
           <View style={styles.titleRow}>
@@ -109,7 +110,7 @@ export function SaleCancelDialog({
           </Button>
         </Dialog.Actions>
       </Dialog>
-    </Portal>
+    </AppModalOverlay>
   );
 }
 

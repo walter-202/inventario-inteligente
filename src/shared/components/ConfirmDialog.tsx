@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { StyleSheet } from "react-native";
-import { Button, Dialog, Portal, Text } from "react-native-paper";
+import { Button, Dialog, Text } from "react-native-paper";
+import { AppModalOverlay } from "./AppModalOverlay";
 import { colors } from "../theme";
 
 export interface ConfirmConfig {
@@ -61,7 +62,7 @@ export function useConfirm() {
   );
 
   const dialog = (
-    <Portal>
+    <AppModalOverlay visible={pending !== null} onDismiss={() => settle(false)}>
       <Dialog visible={pending !== null} onDismiss={() => settle(false)} style={styles.dialog}>
         {pending ? (
           <>
@@ -84,7 +85,7 @@ export function useConfirm() {
           </>
         ) : null}
       </Dialog>
-    </Portal>
+    </AppModalOverlay>
   );
 
   return { requestConfirm, dialog };

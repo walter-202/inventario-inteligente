@@ -176,14 +176,25 @@ export function ProductForm({ branches, resetToken = 0, loading = false, serverE
   const [scanModalTarget, setScanModalTarget] = useState<"codigo" | "codigo_barra" | null>(null);
 
   useEffect(() => {
-    if (initialValues?.codigo || initialValues?.codigo_barra) {
-      setValues((prev) => ({
-        ...prev,
-        codigo: initialValues.codigo ?? prev.codigo,
-        codigo_barra: initialValues.codigo_barra ?? prev.codigo_barra,
-      }));
-    }
-  }, [initialValues?.codigo, initialValues?.codigo_barra]);
+    if (!initialValues) return;
+    setValues((prev) => ({
+      nombre: initialValues.nombre ?? prev.nombre,
+      codigo: initialValues.codigo ?? prev.codigo,
+      codigo_barra: initialValues.codigo_barra ?? prev.codigo_barra,
+      categoria: initialValues.categoria ?? prev.categoria,
+      subcategoria: initialValues.subcategoria ?? prev.subcategoria,
+      precio: initialValues.precio !== undefined ? String(initialValues.precio) : prev.precio,
+      cantidad: initialValues.cantidad !== undefined ? String(initialValues.cantidad) : prev.cantidad,
+    }));
+  }, [
+    initialValues?.nombre,
+    initialValues?.codigo,
+    initialValues?.codigo_barra,
+    initialValues?.categoria,
+    initialValues?.subcategoria,
+    initialValues?.precio,
+    initialValues?.cantidad,
+  ]);
 
   const voice = useVoiceRegistration();
   const pulse = usePulse(voice.state === "listening");

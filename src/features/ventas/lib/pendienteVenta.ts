@@ -1,3 +1,4 @@
+import { limpiarRegistroPendiente } from "../../productos/lib/pendienteRegistro";
 import type { Producto } from "../../../shared/types/domain";
 
 export interface ItemPendienteVenta {
@@ -41,5 +42,6 @@ export function subscribeAuthorizationScopeReset(listener: () => void): () => vo
 export function clearAuthorizationScopedSalesState(): void {
   limpiarProductoPendiente();
   limpiarLotePendiente();
+  limpiarRegistroPendiente();
   for (const listener of [...authorizationScopeResetListeners]) listener();
 }

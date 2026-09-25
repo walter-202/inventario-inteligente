@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { Linking, StyleSheet, TouchableOpacity, View } from "react-native";
 import { BarcodeScanningResult, BarcodeType, CameraView, useCameraPermissions } from "expo-camera";
-import { ActivityIndicator, Button, Dialog, Portal, Surface, Text, TextInput } from "react-native-paper";
+import { ActivityIndicator, Button, Dialog, Surface, Text, TextInput } from "react-native-paper";
+import { AppModalOverlay } from "../../../shared/components/AppModalOverlay";
 import {
   AlertCircle,
   CheckCircle2,
@@ -344,8 +345,7 @@ export function BarcodeScannerView({
         </View>
       )}
 
-      {/* Dialog para ingresar código manual */}
-      <Portal>
+      <AppModalOverlay visible={manualDialogVisible} onDismiss={() => setManualDialogVisible(false)}>
         <Dialog visible={manualDialogVisible} onDismiss={() => setManualDialogVisible(false)}>
           <Dialog.Title>Ingresar código manual</Dialog.Title>
           <Dialog.Content>
@@ -369,7 +369,7 @@ export function BarcodeScannerView({
             </Button>
           </Dialog.Actions>
         </Dialog>
-      </Portal>
+      </AppModalOverlay>
     </View>
   );
 }
