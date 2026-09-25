@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { generateStructuredOutput } from "../lib/aiSdkProviders";
+import { completeChatJSON } from "../lib/aiGateway";
+import {
+  ASSISTANT_CONFIG_MESSAGE,
+  ASSISTANT_PROVIDER_ERROR_MESSAGE,
+  listAssistantModels,
+} from "../lib/aiSdkProviders";
 
 const optionalText = z.preprocess((value) => {
   if (value == null || value === "") return null;
@@ -66,20 +71,29 @@ const INSTRUCTIONS = [
   "categoria: categoría (ej: belleza, accesorios, hogar, regalos, novedades).",
   "precio: número en BOB/Bs si lo menciona.",
   "cantidad: stock inicial entero si lo menciona.",
+  "Respondé únicamente con JSON válido.",
 ].join("\n");
 
 /**
- * Interprets voice text for product registration via generateText + Output.object.
- * Does not write to the catalog; the form / propose_product_registration card still confirms.
+ * Interprets voice text for product registration via direct provider HTTP (json_object).
+ * Avoids AI SDK structured output, which is unreliable on Expo/Hermes streams.
  */
 export async function interpretarRegistroProducto(texto: string): Promise<RegistroProductoParsed> {
   const phrase = texto.trim();
   if (!phrase) return EMPTY_REGISTRO;
 
-  return generateStructuredOutput({
+  const models = await listAssistantModels();
+  if (models.length === 0) {
+    throw new Error(ASSISTANT_CONFIG_MESSAGE);
+  }
+
+  const result = await completeChatJSON({
+    systemPrompt: INSTRUCTIONS,
+    userMessage: `Texto dictado: "${phrase}"`,
     schema: RegistroProductoSchema,
-    instructions: INSTRUCTIONS,
-    messages: [{ role: "user", content: `Texto dictado: "${phrase}"` }],
     timeoutMs: 20_000,
   });
+
+  if (result.data) return result.data;
+  throw new Error(ASSISTANT_PROVIDER_ERROR_MESSAGE);
 }

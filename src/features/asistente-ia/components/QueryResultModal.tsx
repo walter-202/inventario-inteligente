@@ -3,6 +3,7 @@ import { StyleSheet, View, ScrollView } from "react-native";
 import { Package, TrendingUp, Store, CheckCircle2, AlertTriangle, XCircle } from "lucide-react-native";
 import { colors, spacing } from "../../../shared/theme";
 import type { ResultadoInterpretacion } from "../api/voiceCommandApi";
+import { formatSalesPeriodLabel } from "../../dashboard/api/dashboardApi";
 
 interface QueryResultModalProps {
   visible: boolean;
@@ -127,7 +128,8 @@ export function QueryResultModal({ visible, result, onDismiss }: QueryResultModa
                   Resumen de Ventas
                 </Text>
                 <Text variant="bodySmall" style={styles.subtitle}>
-                  {result.filtroSucursal ? `Sucursal ${result.filtroSucursal}` : "Todas las sucursales"} • Hoy
+                  {result.filtroSucursal ? `Sucursal ${result.filtroSucursal}` : "Todas las sucursales"} •{" "}
+                  {formatSalesPeriodLabel(result.periodo, result.diasAtras)}
                 </Text>
               </View>
             </View>

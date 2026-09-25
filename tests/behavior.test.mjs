@@ -25,7 +25,20 @@ function stubReadApi(overrides = {}) {
     searchProducts: async () => [],
     stockForProduct: async () => [],
     getBranches: async () => [{ id: 2, nombre: "Comercio" }, { id: 4, nombre: "Central" }],
-    getTodaySales: async () => ({ totalSales: 0, salesCount: 0 }),
+    getSalesSummary: async () => ({ totalSales: 0, salesCount: 0, periodo: "hoy" }),
+    getRotationAnalysis: async () => ({
+      diasAnalizados: 30,
+      totalUnidadesVendidas: 0,
+      totalIngresos: 0,
+      productosAltaRotacion: 0,
+      productosMediaRotacion: 0,
+      productosBajaRotacion: 0,
+      capitalInmovilizado: 0,
+      items: [],
+      rendimientoCategorias: [],
+      insightsMarketing: [],
+    }),
+    getKardex: async () => [],
     getLowStock: async () => [],
     getStockList: async () => [],
     ...overrides,
@@ -53,6 +66,22 @@ test("voice duplicate products are aggregated before stock checks", () => {
     { producto: product, cantidadSolicitada: 1 },
     { producto: { ...product, precio: 11 }, cantidadSolicitada: 1 },
   ]), AmbiguousVoiceLineError);
+});
+
+test("sale confirmation cart merges additional products by product id", () => {
+  const { mergeConfirmationLines } = loadTsModule("src/features/asistente-ia/lib/voiceLines.ts");
+  const merged = mergeConfirmationLines(
+    [{ producto_id: 1, nombre: "Sombras para Cejas", cantidad: 2, precio: 35 }],
+    [{ producto_id: 2, nombre: "Labial Mate", cantidad: 1, precio: 25 }],
+  );
+  assert.equal(merged.length, 2);
+  assert.deepEqual(
+    mergeConfirmationLines(
+      [{ producto_id: 1, nombre: "Sombras para Cejas", cantidad: 2, precio: 35 }],
+      [{ producto_id: 1, nombre: "Sombras para Cejas", cantidad: 1, precio: 35 }],
+    ),
+    [{ producto_id: 1, nombre: "Sombras para Cejas", cantidad: 3, precio: 35 }],
+  );
 });
 
 test("dashboard buckets a Caracas 22:00 sale into the local calendar day", () => {
@@ -303,7 +332,11 @@ test("assistant tools are filtered by role abilities", () => {
 
   assert.deepEqual(
     listToolNamesForAbilities(["products.read", "inventory.read"]).sort(),
-    ["get_stock", "list_inventory", "list_low_stock", "search_products"].sort(),
+    ["get_kardex", "get_stock", "list_inventory", "list_low_stock", "search_products"].sort(),
+  );
+  assert.deepEqual(
+    listToolNamesForAbilities(["dashboard.read"]).sort(),
+    ["get_rotation_analysis"].sort(),
   );
   assert.equal(listToolNamesForAbilities(["sales.write"]).includes("propose_sale"), true);
   assert.equal(listToolNamesForAbilities(["sales.write"]).includes("propose_product_registration"), false);
@@ -352,21 +385,35 @@ test("assistant sales tool defaults to the active authorized branch and rejects 
   const tools = createAssistantToolExecutors({
     scope: assistantScope(),
     readApi: stubReadApi({
-      getTodaySales: async (branchId) => {
-        calls.push(branchId);
-        return { totalSales: 15, salesCount: 1 };
+      getSalesSummary: async (periodo, branchId, diasAtras) => {
+        calls.push({ periodo, branchId, diasAtras });
+        return { totalSales: 15, salesCount: 1, periodo, diasAtras };
       },
     }),
   });
 
-  const defaultResult = await tools.get_sales_today.execute({ sucursal: null });
+  const defaultResult = await tools.get_sales_summary.execute({ periodo: "hoy", sucursal: null });
   assert.equal(defaultResult.kind, "consulta_ventas");
   assert.equal(defaultResult.periodo, "hoy");
-  assert.deepEqual(calls, [2]);
+  assert.deepEqual(calls, [{ periodo: "hoy", branchId: 2, diasAtras: undefined }]);
 
-  const excluded = await tools.get_sales_today.execute({ sucursal: "Central" });
+  const weekResult = await tools.get_sales_summary.execute({ periodo: "semana", sucursal: null });
+  assert.equal(weekResult.periodo, "semana");
+  assert.deepEqual(calls[1], { periodo: "semana", branchId: 2, diasAtras: undefined });
+
+  const threeDaysResult = await tools.get_sales_summary.execute({ periodo: "dia", dias_atras: 3, sucursal: null });
+  assert.equal(threeDaysResult.periodo, "dia");
+  assert.equal(threeDaysResult.diasAtras, 3);
+  assert.match(threeDaysResult.mensaje, /hace 3 días/);
+  assert.deepEqual(calls[2], { periodo: "dia", branchId: 2, diasAtras: 3 });
+
+  const excluded = await tools.get_sales_summary.execute({ periodo: "hoy", sucursal: "Central" });
   assert.equal(excluded.error, "unknown_branch");
-  assert.deepEqual(calls, [2]);
+  assert.deepEqual(calls, [
+    { periodo: "hoy", branchId: 2, diasAtras: undefined },
+    { periodo: "semana", branchId: 2, diasAtras: undefined },
+    { periodo: "dia", branchId: 2, diasAtras: 3 },
+  ]);
 });
 
 test("voice SKU normalization repairs dictated codes before matching", () => {
@@ -1176,18 +1223,18 @@ test("search_products dispatches only the extracted product name to the read API
   assert.deepEqual(receivedQueries, ["Jean Mom Fit"]);
 });
 
-test("read tools filter low stock and today's sales by an exact authorized branch", async () => {
+test("read tools filter low stock and sales by an exact authorized branch", async () => {
   const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
-  const calls = { lowStock: [], todaySales: [] };
+  const calls = { lowStock: [], salesSummary: [] };
   const tools = createAssistantToolExecutors({
     scope: assistantScope({
       allowedBranchIds: [2, 4],
       allowedBranchNames: ["Comercio", "Central"],
     }),
     readApi: stubReadApi({
-      getTodaySales: async (branchId) => {
-        calls.todaySales.push(branchId);
-        return { totalSales: 320, salesCount: 2 };
+      getSalesSummary: async (periodo, branchId) => {
+        calls.salesSummary.push({ periodo, branchId });
+        return { totalSales: 320, salesCount: 2, periodo };
       },
       getLowStock: async (branchId) => {
         calls.lowStock.push(branchId);
@@ -1200,15 +1247,15 @@ test("read tools filter low stock and today's sales by an exact authorized branc
   assert.equal(lowStock.kind, "consulta_bajo_stock");
   assert.deepEqual(calls.lowStock, [4]);
 
-  const todaySales = await tools.get_sales_today.execute({ sucursal: "Central" });
+  const todaySales = await tools.get_sales_summary.execute({ periodo: "hoy", sucursal: "Central" });
   assert.equal(todaySales.kind, "consulta_ventas");
   assert.equal(todaySales.periodo, "hoy");
-  assert.deepEqual(calls.todaySales, [4]);
+  assert.deepEqual(calls.salesSummary, [{ periodo: "hoy", branchId: 4 }]);
 });
 
 test("sales tool rejects an unknown explicit branch before querying", async () => {
   const { createAssistantToolExecutors } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
-  let todaySalesCalls = 0;
+  let salesSummaryCalls = 0;
   const tools = createAssistantToolExecutors({
     scope: assistantScope({
       allowedBranchIds: [4],
@@ -1218,25 +1265,143 @@ test("sales tool rejects an unknown explicit branch before querying", async () =
     }),
     readApi: stubReadApi({
       getBranches: async () => [{ id: 4, nombre: "Central" }],
-      getTodaySales: async () => {
-        todaySalesCalls += 1;
-        return { totalSales: 0, salesCount: 0 };
+      getSalesSummary: async () => {
+        salesSummaryCalls += 1;
+        return { totalSales: 0, salesCount: 0, periodo: "hoy" };
       },
     }),
   });
 
-  const result = await tools.get_sales_today.execute({ sucursal: "Fantasma" });
+  const result = await tools.get_sales_summary.execute({ periodo: "hoy", sucursal: "Fantasma" });
   assert.equal(result.error, "unknown_branch");
-  assert.equal(todaySalesCalls, 0);
+  assert.equal(salesSummaryCalls, 0);
   assert.match(result.message, /Fantasma/i);
 });
 
+test("rotation and kardex tools query scoped analytics and movement history", async () => {
+  const { createAssistantToolExecutors, mapToolOutputsToResult } = loadTsModule("src/features/asistente-ia/lib/assistantTools.ts");
+  const calls = { rotation: [], kardex: [] };
+  const tools = createAssistantToolExecutors({
+    scope: assistantScope({
+      role: "encargada",
+      abilities: ["ai.read", "products.read", "inventory.read", "sales.read", "dashboard.read"],
+    }),
+    readApi: stubReadApi({
+      getRotationAnalysis: async (options) => {
+        calls.rotation.push(options);
+        return {
+          diasAnalizados: options?.dias ?? 30,
+          totalUnidadesVendidas: 42,
+          totalIngresos: 980,
+          productosAltaRotacion: 2,
+          productosMediaRotacion: 3,
+          productosBajaRotacion: 5,
+          capitalInmovilizado: 1200,
+          items: [
+            {
+              productoId: 1,
+              nombre: "Labial Mate",
+              codigo: "BEL-001",
+              categoria: "Belleza",
+              precio: 35,
+              stockActual: 8,
+              unidadesVendidas: 12,
+              ingresosTotales: 420,
+              tasaRotacion: 0.6,
+              clasificacion: "alta",
+            },
+          ],
+          rendimientoCategorias: [{ categoria: "Belleza", unidadesVendidas: 12, ingresosTotales: 420, porcentajeVentas: 100 }],
+          insightsMarketing: [{ id: "x", tipo: "estrella", titulo: "Estrella", descripcion: "Vende bien", accionSugerida: "Destacar" }],
+        };
+      },
+      getKardex: async (filters) => {
+        calls.kardex.push(filters);
+        return [
+          {
+            id: 1,
+            fecha: "2026-09-20T12:00:00.000Z",
+            producto_id: 9,
+            producto_nombre: "Jean Mom Fit",
+            producto_codigo: "JEA-001",
+            sucursal_id: 2,
+            sucursal_nombre: "Comercio",
+            tipo: "salida",
+            subtipo: "venta",
+            cantidad: 2,
+            saldo_resultante: 10,
+          },
+        ];
+      },
+      searchProducts: async () => [{ id: 9, nombre: "Jean Mom Fit", codigo: "JEA-001", categoria: "Pantalones", precio: 185, cantidad: 12 }],
+    }),
+  });
+
+  const rotation = await tools.get_rotation_analysis.execute({ dias: 30, sucursal: null, clasificacion: "alta", limite: 5 });
+  assert.equal(rotation.kind, "consulta_rotacion");
+  assert.equal(rotation.items.length, 1);
+  assert.deepEqual(calls.rotation, [{ dias: 30, sucursalId: 2 }]);
+
+  const kardex = await tools.get_kardex.execute({ query: "jean mom", sucursal: null, tipo: "salida", limite: 10 });
+  assert.equal(kardex.kind, "consulta_kardex");
+  assert.equal(kardex.tipo, "consulta_kardex");
+  assert.equal(kardex.resumen.total, 1);
+  assert.deepEqual(calls.kardex[0], { producto_id: 9, sucursal_id: 2, tipo: "salida", limite: 10 });
+
+  const mapped = mapToolOutputsToResult(
+    [{ toolName: "get_rotation_analysis", output: rotation }],
+    "Rotación analizada",
+    ["Tool: get_rotation_analysis"],
+  );
+  assert.equal(mapped.tipo, "consulta_rotacion");
+});
+
 test("today sales calendar uses local midnight boundaries rather than the dashboard's seven-day window", () => {
-  const { getTodayCalendar } = loadTsModule("src/features/dashboard/lib/dateBuckets.ts");
+  const { getTodayCalendar, getDayCalendarDaysAgo } = loadTsModule("src/features/dashboard/lib/dateBuckets.ts");
+  const { formatSalesPeriodLabel } = loadTsModule("src/features/dashboard/api/dashboardApi.ts");
   const { startInclusive, endExclusive } = getTodayCalendar(new Date("2026-09-16T22:00:00-04:00"));
 
   assert.equal(startInclusive.toISOString(), "2026-09-16T04:00:00.000Z");
   assert.equal(endExclusive.toISOString(), "2026-09-17T04:00:00.000Z");
+
+  const threeDaysAgo = getDayCalendarDaysAgo(3, new Date("2026-09-20T15:00:00-04:00"));
+  assert.equal(threeDaysAgo.dateKey, "2026-09-17");
+  assert.equal(formatSalesPeriodLabel("dia", 3), "hace 3 días");
+  assert.equal(formatSalesPeriodLabel("dia", 1), "ayer");
+});
+
+test("assistant sales summary adapter forwards diasAtras as fourth argument, not as now", () => {
+  const { mapAssistantSalesSummaryCall } = loadTsModule("src/features/asistente-ia/api/voiceCommandApi.ts");
+  const fixedNow = new Date("2026-09-23T15:00:00-04:00");
+
+  assert.deepEqual(mapAssistantSalesSummaryCall("dia", 2, 3, fixedNow), {
+    periodo: "dia",
+    sucursalId: 2,
+    now: fixedNow,
+    diasAtras: 3,
+  });
+  assert.deepEqual(mapAssistantSalesSummaryCall("hoy", 2, undefined, fixedNow), {
+    periodo: "hoy",
+    sucursalId: 2,
+    now: fixedNow,
+    diasAtras: 0,
+  });
+});
+
+test("product registration chat flow merges parsed fields and keeps confirmation card", () => {
+  const { mergeRegistroProductoParsed, esConfirmacionRegistroProducto, buildRegistroProductoConfirmInput } =
+    loadTsModule("src/features/asistente-ia/lib/productRegistrationFlow.ts");
+  const merged = mergeRegistroProductoParsed(
+    { nombre: "sombra", categoria: "belleza", precio: 65, cantidad: 10, codigo: null, codigo_barra: null },
+    { nombre: "sombra para pestañas", codigo: "SOMB-PST-001", categoria: null, precio: null, cantidad: null, codigo_barra: null },
+  );
+  assert.equal(merged.nombre, "sombra para pestañas");
+  assert.equal(merged.codigo, "SOMB-PST-001");
+  assert.equal(merged.precio, 65);
+  assert.equal(esConfirmacionRegistroProducto("si registralo"), true);
+  const input = buildRegistroProductoConfirmInput(merged, 2);
+  assert.equal(input?.precio, 65);
+  assert.equal(input?.sucursal_id, 2);
 });
 
 test("assistant chat persistence is user-scoped, bounded, and hydrates only display-safe messages", async () => {
@@ -1316,7 +1481,7 @@ test("assistant chat persistence is user-scoped, bounded, and hydrates only disp
 
 test("assistant scope selects only authorized branches and rechecks writes", () => {
   const { buildAssistantScopeContext, resolveAssistantBranch, canExecuteAssistantWrite } = loadTsModule("src/features/asistente-ia/lib/assistantAuthorization.ts");
-  const profile = { id: "user-a", email: "a@example.com", nombre: "Ana", rol: "cajera", sucursal_id: 2, created_at: "", updated_at: "" };
+  const profile = { id: "user-a", email: "a@example.com", nombre: "Ana", rol: "cajera", sucursal_id: 2, sucursal_ids: [2], created_at: "", updated_at: "" };
   const branches = [{ id: 1, nombre: "Central" }, { id: 2, nombre: "Comercio" }];
 
   assert.equal(resolveAssistantBranch(profile, branches, 1), 2);

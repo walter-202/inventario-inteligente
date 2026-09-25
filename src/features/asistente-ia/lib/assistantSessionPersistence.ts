@@ -148,6 +148,12 @@ function persistableAttachment(attachment: ChatAttachment | undefined): ChatAtta
   if (attachment.kind === "lista-inventario") {
     return { ...attachment, filas: attachment.filas.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
   }
+  if (attachment.kind === "consulta-rotacion") {
+    return { ...attachment, items: attachment.items.slice(0, MAX_STORED_ATTACHMENT_ROWS), insights: attachment.insights.slice(0, 3) };
+  }
+  if (attachment.kind === "consulta-kardex") {
+    return { ...attachment, movimientos: attachment.movimientos.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
+  }
   return undefined;
 }
 
@@ -164,7 +170,18 @@ function parseDisplayAttachment(value: unknown): ChatAttachment | undefined {
     const totalVentas = asFiniteNumber(value.totalVentas);
     const cantidadVentas = asFiniteNumber(value.cantidadVentas);
     if (totalVentas === null || cantidadVentas === null) return undefined;
-    return { kind: "consulta-ventas", totalVentas, cantidadVentas };
+    const periodo =
+      value.periodo === "hoy" || value.periodo === "semana" || value.periodo === "mes" || value.periodo === "dia"
+        ? value.periodo
+        : "hoy";
+    const diasAtras = asFiniteNumber(value.diasAtras);
+    return {
+      kind: "consulta-ventas",
+      totalVentas,
+      cantidadVentas,
+      periodo,
+      ...(periodo === "dia" && diasAtras !== null ? { diasAtras } : {}),
+    };
   }
   if (value.kind === "busqueda-productos") {
     const consulta = asNonEmptyString(value.consulta);
@@ -191,6 +208,63 @@ function parseDisplayAttachment(value: unknown): ChatAttachment | undefined {
       .filter((row): row is NonNullable<typeof row> => row !== null)
       .slice(0, MAX_STORED_ATTACHMENT_ROWS);
     return { kind: "lista-inventario", minStock, filas };
+  }
+  if (value.kind === "consulta-rotacion") {
+    const dias = asFiniteNumber(value.dias);
+    const totalUnidades = asFiniteNumber(value.totalUnidades);
+    const totalIngresos = asFiniteNumber(value.totalIngresos);
+    const capitalInmovilizado = asFiniteNumber(value.capitalInmovilizado);
+    if (dias === null || totalUnidades === null || totalIngresos === null || capitalInmovilizado === null) return undefined;
+    if (!Array.isArray(value.items) || !Array.isArray(value.insights)) return undefined;
+    const items = value.items
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item) => ({
+        nombre: asNonEmptyString(item.nombre) ?? "",
+        codigo: asNonEmptyString(item.codigo) ?? "",
+        unidadesVendidas: asFiniteNumber(item.unidadesVendidas) ?? 0,
+        stockActual: asFiniteNumber(item.stockActual) ?? 0,
+        clasificacion: asNonEmptyString(item.clasificacion) ?? "media",
+      }))
+      .slice(0, MAX_STORED_ATTACHMENT_ROWS);
+    const insights = value.insights
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item) => ({
+        titulo: asNonEmptyString(item.titulo) ?? "",
+        descripcion: asNonEmptyString(item.descripcion) ?? "",
+      }))
+      .slice(0, 3);
+    return { kind: "consulta-rotacion", dias, totalUnidades, totalIngresos, capitalInmovilizado, items, insights };
+  }
+  if (value.kind === "consulta-kardex") {
+    const tipoMovimiento =
+      value.tipoMovimiento === "entrada" || value.tipoMovimiento === "salida" || value.tipoMovimiento === "todas"
+        ? value.tipoMovimiento
+        : "todas";
+    if (!isRecord(value.resumen) || !Array.isArray(value.movimientos)) return undefined;
+    const resumen = {
+      entradas: asFiniteNumber(value.resumen.entradas) ?? 0,
+      salidas: asFiniteNumber(value.resumen.salidas) ?? 0,
+      transferencias: asFiniteNumber(value.resumen.transferencias) ?? 0,
+      total: asFiniteNumber(value.resumen.total) ?? 0,
+    };
+    const movimientos = value.movimientos
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item) => ({
+        fecha: asNonEmptyString(item.fecha) ?? "",
+        productoNombre: asNonEmptyString(item.productoNombre) ?? "",
+        productoCodigo: asNonEmptyString(item.productoCodigo) ?? "",
+        tipo: asNonEmptyString(item.tipo) ?? "entrada",
+        cantidad: asFiniteNumber(item.cantidad) ?? 0,
+        saldoResultante: asFiniteNumber(item.saldoResultante) ?? undefined,
+      }))
+      .slice(0, MAX_STORED_ATTACHMENT_ROWS);
+    return {
+      kind: "consulta-kardex",
+      productoNombre: asNonEmptyString(value.productoNombre) ?? undefined,
+      tipoMovimiento,
+      movimientos,
+      resumen,
+    };
   }
   return undefined;
 }

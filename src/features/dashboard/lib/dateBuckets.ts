@@ -13,11 +13,32 @@ export function getTodayCalendar(now: Date): { startInclusive: Date; endExclusiv
   return { startInclusive, endExclusive };
 }
 
+/** Local calendar day N days before `now` (0 = hoy, 1 = ayer, 3 = hace 3 días). */
+export function getDayCalendarDaysAgo(
+  daysAgo: number,
+  now: Date,
+): { startInclusive: Date; endExclusive: Date; dateKey: string } {
+  const safeDaysAgo = Number.isFinite(daysAgo) ? Math.max(0, Math.floor(daysAgo)) : 0;
+  const startInclusive = startOfLocalDay(now);
+  startInclusive.setDate(startInclusive.getDate() - safeDaysAgo);
+  const endExclusive = new Date(startInclusive);
+  endExclusive.setDate(endExclusive.getDate() + 1);
+  return { startInclusive, endExclusive, dateKey: localDateKey(startInclusive) };
+}
+
 export function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+export function getMonthCalendar(now: Date): { startInclusive: Date; endExclusive: Date } {
+  const startInclusive = startOfLocalDay(now);
+  startInclusive.setDate(1);
+  const endExclusive = new Date(startInclusive);
+  endExclusive.setMonth(endExclusive.getMonth() + 1);
+  return { startInclusive, endExclusive };
 }
 
 export function getDashboardCalendar(now: Date): { days: DashboardDay[]; startInclusive: Date; endExclusive: Date } {

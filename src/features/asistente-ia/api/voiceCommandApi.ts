@@ -1,4 +1,13 @@
-import type { DashboardLowStockItem, DashboardMetrics, Producto, Sucursal } from "../../../shared/types/domain";
+import type {
+  AnalisisRotacionResumen,
+  DashboardLowStockItem,
+  DashboardMetrics,
+  KardexFilterParams,
+  MovimientoKardexItem,
+  Producto,
+  RotacionClasificacion,
+  Sucursal,
+} from "../../../shared/types/domain";
 import { buscarProductoPorCodigo, buscarProductosAsistente } from "../../productos/api/productosApi";
 import { ProductoNoEncontradoError } from "../../productos/lib/productLookupErrors";
 import {
@@ -12,9 +21,12 @@ import {
 import type { IntentoDesambiguacion } from "../lib/chatSession";
 import type { AssistantScopeContext } from "../lib/assistantAuthorization";
 import { obtenerStockDeProducto, obtenerInventario, obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
-import { obtenerDashboardMetrics, obtenerVentasDeHoy } from "../../dashboard/api/dashboardApi";
+import { obtenerAnalisisRotacion, type OpcionesAnalisisRotacion } from "../../analitica/api/rotacionApi";
+import { obtenerDashboardMetrics, obtenerVentasPorPeriodo, type SalesQueryPeriod } from "../../dashboard/api/dashboardApi";
+import { obtenerKardexMovimientos } from "../../inventario/api/kardexApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
 import type { RegistroProductoParsed } from "./voiceRegistrationService";
+export type { SalesQueryPeriod } from "../../dashboard/api/dashboardApi";
 
 export class InterpretacionError extends Error {
   constructor(message: string) {
@@ -65,9 +77,34 @@ export interface AssistantReadApi {
   searchProducts(query: string, limit: number): Promise<Producto[]>;
   stockForProduct(productoId: number): Promise<StockSucursalDetalle[]>;
   getBranches(): Promise<Sucursal[]>;
-  getTodaySales(sucursalId?: number): Promise<Pick<DashboardMetrics, "totalSales" | "salesCount">>;
+  getSalesSummary(
+    periodo: SalesQueryPeriod,
+    sucursalId?: number,
+    diasAtras?: number,
+  ): Promise<{ totalSales: number; salesCount: number; periodo: SalesQueryPeriod; diasAtras?: number }>;
+  getRotationAnalysis(options?: OpcionesAnalisisRotacion): Promise<AnalisisRotacionResumen>;
+  getKardex(filters?: KardexFilterParams): Promise<MovimientoKardexItem[]>;
   getLowStock(sucursalId?: number): Promise<DashboardLowStockItem[]>;
   getStockList(sucursalId?: number): Promise<StockListItem[]>;
+}
+
+export type KardexResumen = {
+  entradas: number;
+  salidas: number;
+  transferencias: number;
+  total: number;
+};
+
+export function resumirKardex(movimientos: MovimientoKardexItem[]): KardexResumen {
+  let entradas = 0;
+  let salidas = 0;
+  let transferencias = 0;
+  for (const movimiento of movimientos) {
+    if (movimiento.tipo === "entrada") entradas += movimiento.cantidad;
+    else if (movimiento.tipo === "salida") salidas += movimiento.cantidad;
+    else transferencias += movimiento.cantidad;
+  }
+  return { entradas, salidas, transferencias, total: movimientos.length };
 }
 
 async function construirStockList(sucursalId?: number): Promise<StockListItem[]> {
@@ -92,12 +129,35 @@ async function construirStockList(sucursalId?: number): Promise<StockListItem[]>
   return Array.from(agregados.values());
 }
 
+export function mapAssistantSalesSummaryCall(
+  periodo: SalesQueryPeriod,
+  sucursalId?: number,
+  diasAtras?: number,
+  now = new Date(),
+) {
+  const offset = periodo === "dia" ? (diasAtras ?? 0) : 0;
+  return { periodo, sucursalId, now, diasAtras: offset };
+}
+
+async function getAssistantSalesSummary(
+  periodo: SalesQueryPeriod,
+  sucursalId?: number,
+  diasAtras?: number,
+) {
+  const args = mapAssistantSalesSummaryCall(periodo, sucursalId, diasAtras);
+  return obtenerVentasPorPeriodo(args.periodo, args.sucursalId, args.now, args.diasAtras);
+}
+
+export { getAssistantSalesSummary };
+
 export const defaultAssistantReadApi: AssistantReadApi = {
   findProductByCode: buscarProductoPorCodigo,
   searchProducts: buscarProductosAsistente,
   stockForProduct: obtenerStockDeProducto,
   getBranches: obtenerSucursales,
-  getTodaySales: obtenerVentasDeHoy,
+  getSalesSummary: getAssistantSalesSummary,
+  getRotationAnalysis: obtenerAnalisisRotacion,
+  getKardex: obtenerKardexMovimientos,
   getLowStock: async (sucursalId) => (await obtenerDashboardMetrics(sucursalId)).lowStock,
   getStockList: construirStockList,
 };
@@ -156,7 +216,51 @@ export type ResultadoInterpretacion =
       filtroSucursal?: string;
       totalVentas: number;
       cantidadVentas: number;
-      periodo: "hoy";
+      periodo: SalesQueryPeriod;
+      diasAtras?: number;
+      mensaje: string;
+      pasosPensamiento?: string[];
+    }
+  | {
+      tipo: "consulta_rotacion";
+      filtroSucursal?: string;
+      diasAnalizados: number;
+      totalUnidadesVendidas: number;
+      totalIngresos: number;
+      capitalInmovilizado: number;
+      productosAltaRotacion: number;
+      productosMediaRotacion: number;
+      productosBajaRotacion: number;
+      items: Array<{
+        nombre: string;
+        codigo: string;
+        unidadesVendidas: number;
+        stockActual: number;
+        clasificacion: RotacionClasificacion;
+      }>;
+      insights: Array<{ titulo: string; descripcion: string; accionSugerida: string }>;
+      categorias: Array<{ categoria: string; unidadesVendidas: number; porcentajeVentas: number }>;
+      mensaje: string;
+      pasosPensamiento?: string[];
+    }
+  | {
+      tipo: "consulta_kardex";
+      filtroSucursal?: string;
+      productoNombre?: string;
+      productoCodigo?: string;
+      tipoMovimiento: "entrada" | "salida" | "todas";
+      movimientos: Array<{
+        fecha: string;
+        productoNombre: string;
+        productoCodigo: string;
+        sucursalNombre: string;
+        tipo: MovimientoKardexItem["tipo"];
+        subtipo?: MovimientoKardexItem["subtipo"];
+        cantidad: number;
+        saldoResultante?: number;
+        observacion?: string;
+      }>;
+      resumen: KardexResumen;
       mensaje: string;
       pasosPensamiento?: string[];
     };
@@ -299,4 +403,78 @@ export async function consultarStockDe(
     stockTotal,
     mensaje,
   };
+}
+
+function mapKardexMovimiento(item: MovimientoKardexItem) {
+  return {
+    fecha: item.fecha,
+    productoNombre: item.producto_nombre,
+    productoCodigo: item.producto_codigo,
+    sucursalNombre: item.sucursal_nombre,
+    tipo: item.tipo,
+    subtipo: item.subtipo,
+    cantidad: item.cantidad,
+    saldoResultante: item.saldo_resultante,
+    observacion: item.observacion ?? undefined,
+  };
+}
+
+export function buildConsultaKardexResult(input: {
+  movimientos: MovimientoKardexItem[];
+  filtroSucursal?: string;
+  producto?: Pick<Producto, "nombre" | "codigo">;
+  tipoMovimiento: "entrada" | "salida" | "todas";
+}): Extract<ResultadoInterpretacion, { tipo: "consulta_kardex" }> {
+  const resumen = resumirKardex(input.movimientos);
+  const productoTexto = input.producto ? ` de "${input.producto.nombre}"` : "";
+  const sucursalTexto = input.filtroSucursal ? ` en ${input.filtroSucursal}` : "";
+  const tipoTexto =
+    input.tipoMovimiento === "todas"
+      ? ""
+      : input.tipoMovimiento === "entrada"
+        ? " (solo entradas)"
+        : " (solo salidas)";
+  const mensaje = resumen.total
+    ? `Encontré ${resumen.total} movimiento${resumen.total === 1 ? "" : "s"}${productoTexto}${sucursalTexto}${tipoTexto}.`
+    : `No hay movimientos registrados${productoTexto}${sucursalTexto}${tipoTexto}.`;
+
+  return {
+    tipo: "consulta_kardex",
+    filtroSucursal: input.filtroSucursal,
+    productoNombre: input.producto?.nombre,
+    productoCodigo: input.producto?.codigo,
+    tipoMovimiento: input.tipoMovimiento,
+    movimientos: input.movimientos.map(mapKardexMovimiento),
+    resumen,
+    mensaje,
+  };
+}
+
+export async function consultarKardexDe(
+  producto: Producto,
+  options: {
+    sucursal?: string;
+    tipo?: "entrada" | "salida" | "todas";
+    limite?: number;
+  },
+  readApi: AssistantReadApi,
+  scope: AssistantScopeContext,
+): Promise<Extract<ResultadoInterpretacion, { tipo: "consulta_kardex" }>> {
+  const branch = await resolveScopedBranch(options.sucursal, readApi, scope);
+  if (branch.kind === "unknown") {
+    throw new InterpretacionError(`No reconozco la sucursal "${branch.solicitada}".`);
+  }
+  const tipoMovimiento = options.tipo ?? "todas";
+  const movimientos = await readApi.getKardex({
+    producto_id: producto.id,
+    sucursal_id: branch.branchId,
+    tipo: tipoMovimiento,
+    limite: options.limite ?? 15,
+  });
+  return buildConsultaKardexResult({
+    movimientos,
+    filtroSucursal: branch.branchName,
+    producto,
+    tipoMovimiento,
+  });
 }

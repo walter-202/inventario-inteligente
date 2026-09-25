@@ -5,6 +5,7 @@ import { normalizarMonedaAsistente } from "../../../shared/lib/utils";
 import type { AssistantScopeContext } from "./assistantAuthorization";
 import type { IntentoDesambiguacion } from "./chatSession";
 import {
+  buildConsultaKardexResult,
   consultarStockDe,
   defaultAssistantReadApi,
   resolveScopedBranch,
@@ -15,6 +16,7 @@ import {
   type ResultadoInterpretacion,
 } from "../api/voiceCommandApi";
 import { RegistroProductoSchema, type RegistroProductoParsed } from "../api/voiceRegistrationService";
+import { formatSalesPeriodLabel, type SalesQueryPeriod } from "../../dashboard/api/dashboardApi";
 
 export {
   ASSISTANT_CONFIG_MESSAGE,
@@ -33,7 +35,9 @@ export const TOOL_ABILITIES = {
   get_stock: "inventory.read",
   list_low_stock: "inventory.read",
   list_inventory: "inventory.read",
-  get_sales_today: "sales.read",
+  get_sales_summary: "sales.read",
+  get_rotation_analysis: "dashboard.read",
+  get_kardex: "inventory.read",
   propose_sale: "sales.write",
   propose_product_registration: "products.write",
 } as const satisfies Record<string, Ability>;
@@ -182,26 +186,165 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
         };
       },
     },
-    get_sales_today: {
+    get_sales_summary: {
       description:
-        "Resumen de ventas SOLO de hoy. No existe periodo semana ni mes. Usala para 'cuánto se vendió hoy'. Si mencionan otra sucursal, pasala; si no, usá la sucursal activa.",
+        "Resumen de ventas por periodo. periodo='hoy' = día actual; 'semana' = últimos 7 días; 'mes' = mes calendario actual; 'dia' = un solo día calendario con dias_atras (0=hoy, 1=ayer, 3=hace 3 días). Para 'y hace 3 días?' o 'ventas de ayer' usá periodo='dia' con dias_atras correcto; NO uses 'semana' salvo que pidan explícitamente la semana o últimos 7 días. Si mencionan otra sucursal, pasala; si no, usá la sucursal activa.",
       inputSchema: z.object({
+        periodo: z.enum(["hoy", "semana", "mes", "dia"]).describe("Periodo de ventas a consultar"),
+        dias_atras: z
+          .number()
+          .int()
+          .min(0)
+          .max(90)
+          .nullable()
+          .optional()
+          .describe("Solo con periodo='dia': 0=hoy, 1=ayer, 3=hace 3 días"),
         sucursal: z.string().trim().min(1).nullable().optional(),
       }),
-      execute: async ({ sucursal }) => {
+      execute: async ({
+        periodo,
+        dias_atras,
+        sucursal,
+      }: {
+        periodo: SalesQueryPeriod;
+        dias_atras?: number | null;
+        sucursal?: string | null;
+      }) => {
         const branch = await resolveScopedBranch(sucursal, readApi, scope);
         if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
-        const metrics = await readApi.getTodaySales(branch.branchId);
+        const diasAtras = periodo === "dia" ? (dias_atras ?? 0) : undefined;
+        const metrics = await readApi.getSalesSummary(periodo, branch.branchId, diasAtras);
         const filtroSucursal = branch.branchName;
         const sucursalText = filtroSucursal ? `en ${filtroSucursal}` : "en la sucursal activa";
+        const periodoTexto = formatSalesPeriodLabel(metrics.periodo, metrics.diasAtras);
         return {
           kind: "consulta_ventas",
           filtroSucursal,
           totalVentas: metrics.totalSales,
           cantidadVentas: metrics.salesCount,
-          periodo: "hoy" as const,
-          mensaje: `Ventas de hoy ${sucursalText}: Bs. ${metrics.totalSales.toFixed(2)} (${metrics.salesCount} transacción${metrics.salesCount === 1 ? "" : "es"}).`,
+          periodo: metrics.periodo,
+          diasAtras: metrics.diasAtras,
+          mensaje: `Ventas ${periodoTexto} ${sucursalText}: Bs. ${metrics.totalSales.toFixed(2)} (${metrics.salesCount} transacción${metrics.salesCount === 1 ? "" : "es"}).`,
         };
+      },
+    },
+    get_rotation_analysis: {
+      description:
+        "Analiza rotación de productos e insights de marketing. Usala para 'qué rota', 'prendas estrella', 'capital inmovilizado', 'productos estancados' o rendimiento por categoría. NO la uses para stock puntual (get_stock) ni ventas del día (get_sales_summary).",
+      inputSchema: z.object({
+        dias: z.union([z.literal(15), z.literal(30), z.literal(60), z.literal(90)]).nullable().optional(),
+        sucursal: z.string().trim().min(1).nullable().optional(),
+        clasificacion: z.enum(["alta", "media", "baja", "todas"]).nullable().optional(),
+        limite: z.number().int().min(1).max(20).nullable().optional(),
+      }),
+      execute: async ({ dias, sucursal, clasificacion, limite }) => {
+        const branch = await resolveScopedBranch(sucursal, readApi, scope);
+        if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
+        const analisis = await readApi.getRotationAnalysis({
+          dias: dias ?? 30,
+          sucursalId: branch.branchId,
+        });
+        const filtro = clasificacion && clasificacion !== "todas" ? clasificacion : null;
+        const itemsFiltrados = filtro
+          ? analisis.items.filter((item) => item.clasificacion === filtro)
+          : analisis.items;
+        const topItems = itemsFiltrados.slice(0, limite ?? 8).map((item) => ({
+          nombre: item.nombre,
+          codigo: item.codigo,
+          unidadesVendidas: item.unidadesVendidas,
+          stockActual: item.stockActual,
+          clasificacion: item.clasificacion,
+        }));
+        const insights = analisis.insightsMarketing.slice(0, 3).map((insight) => ({
+          titulo: insight.titulo,
+          descripcion: insight.descripcion,
+          accionSugerida: insight.accionSugerida,
+        }));
+        const categorias = analisis.rendimientoCategorias.slice(0, 5).map((cat) => ({
+          categoria: cat.categoria,
+          unidadesVendidas: cat.unidadesVendidas,
+          porcentajeVentas: cat.porcentajeVentas,
+        }));
+        const ambito = branch.branchName ? ` en ${branch.branchName}` : "";
+        const filtroTexto = filtro ? ` (${filtro} rotación)` : "";
+        return {
+          kind: "consulta_rotacion",
+          filtroSucursal: branch.branchName,
+          diasAnalizados: analisis.diasAnalizados,
+          totalUnidadesVendidas: analisis.totalUnidadesVendidas,
+          totalIngresos: analisis.totalIngresos,
+          capitalInmovilizado: analisis.capitalInmovilizado,
+          productosAltaRotacion: analisis.productosAltaRotacion,
+          productosMediaRotacion: analisis.productosMediaRotacion,
+          productosBajaRotacion: analisis.productosBajaRotacion,
+          items: topItems,
+          insights,
+          categorias,
+          mensaje: `Rotación de ${analisis.diasAnalizados} días${ambito}${filtroTexto}: ${analisis.totalUnidadesVendidas} u. vendidas, Bs. ${analisis.totalIngresos.toFixed(2)} y Bs. ${analisis.capitalInmovilizado.toFixed(2)} inmovilizados.`,
+        };
+      },
+    },
+    get_kardex: {
+      description:
+        "Consulta el historial de movimientos de inventario (kardex). Usala para 'últimos movimientos', 'entradas/salidas de X' o 'historial del producto'. NO registra movimientos. Si piden un producto, pasá query; si no, devuelve los movimientos recientes de la sucursal.",
+      inputSchema: z.object({
+        query: z.string().trim().min(1).nullable().optional(),
+        sucursal: z.string().trim().min(1).nullable().optional(),
+        tipo: z.enum(["entrada", "salida", "todas"]).nullable().optional(),
+        limite: z.number().int().min(1).max(50).nullable().optional(),
+      }),
+      execute: async ({ query, sucursal, tipo, limite }) => {
+        const branch = await resolveScopedBranch(sucursal, readApi, scope);
+        if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
+        const tipoMovimiento = tipo ?? "todas";
+        const maxRows = limite ?? 15;
+        const trimmedQuery = query?.trim();
+
+        if (trimmedQuery) {
+          const coincidencia = await resolverCoincidencia(trimmedQuery, readApi);
+          if (coincidencia.kind === "candidatos") {
+            return {
+              kind: "desambiguacion",
+              texto: trimmedQuery,
+              candidatos: coincidencia.products,
+              intento: {
+                accion: "consulta_kardex",
+                sucursal: branch.branchName,
+                tipo: tipoMovimiento,
+              } satisfies IntentoDesambiguacion,
+            };
+          }
+          if (coincidencia.kind === "none") {
+            return toolError(
+              "not_found",
+              `No se encontró el producto "${trimmedQuery}".`,
+              "Volvé a llamar get_kardex con palabras distintivas del producto o su SKU.",
+            );
+          }
+          const movimientos = await readApi.getKardex({
+            producto_id: coincidencia.product.id,
+            sucursal_id: branch.branchId,
+            tipo: tipoMovimiento,
+            limite: maxRows,
+          });
+          return { kind: "consulta_kardex", ...buildConsultaKardexResult({
+            movimientos,
+            filtroSucursal: branch.branchName,
+            producto: coincidencia.product,
+            tipoMovimiento,
+          }) };
+        }
+
+        const movimientos = await readApi.getKardex({
+          sucursal_id: branch.branchId,
+          tipo: tipoMovimiento,
+          limite: maxRows,
+        });
+        return { kind: "consulta_kardex", ...buildConsultaKardexResult({
+          movimientos,
+          filtroSucursal: branch.branchName,
+          tipoMovimiento,
+        }) };
       },
     },
     propose_sale: {
@@ -388,7 +531,26 @@ export function mapToolOutputsToResult(
         filtroSucursal: "filtroSucursal" in output ? (output.filtroSucursal as string | undefined) : undefined,
         totalVentas: Number(output.totalVentas),
         cantidadVentas: Number(output.cantidadVentas),
-        periodo: "hoy",
+        periodo: "periodo" in output && (output.periodo === "hoy" || output.periodo === "semana" || output.periodo === "mes" || output.periodo === "dia")
+          ? output.periodo
+          : "hoy",
+        diasAtras: "diasAtras" in output && typeof output.diasAtras === "number" ? output.diasAtras : undefined,
+        mensaje: mensaje || "Listo.",
+        pasosPensamiento: thoughts,
+      };
+    }
+    if (kind === "consulta_rotacion" && "diasAnalizados" in output && "items" in output) {
+      return {
+        ...(output as Extract<ResultadoInterpretacion, { tipo: "consulta_rotacion" }>),
+        tipo: "consulta_rotacion",
+        mensaje: mensaje || "Listo.",
+        pasosPensamiento: thoughts,
+      };
+    }
+    if (kind === "consulta_kardex" && "movimientos" in output && "resumen" in output) {
+      return {
+        ...(output as Extract<ResultadoInterpretacion, { tipo: "consulta_kardex" }>),
+        tipo: "consulta_kardex",
         mensaje: mensaje || "Listo.",
         pasosPensamiento: thoughts,
       };
@@ -400,7 +562,7 @@ export function mapToolOutputsToResult(
   }
   return {
     tipo: "aclaracion",
-    mensaje: "¿En qué te ayudo? Puedo vender, consultar stock o las ventas de hoy.",
+    mensaje: "¿En qué te ayudo? Puedo vender, consultar stock, ventas, rotación o movimientos del kardex.",
     pasosPensamiento: thoughts,
   };
 }

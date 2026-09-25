@@ -25,6 +25,7 @@ const profileFor = (rol) => ({
   nombre: rol,
   rol,
   sucursal_id: 1,
+  sucursal_ids: [1],
   created_at: "",
   updated_at: "",
 });
@@ -46,11 +47,12 @@ test("switching assistant users never deletes the previous user's persisted chat
   assert.doesNotMatch(view, /\.removeItem\s*\(/);
 });
 
-test("assistant prompt advertises only the supported sales period", () => {
+test("assistant prompt advertises supported sales periods for data queries", () => {
   const source = read("src/features/asistente-ia/api/assistantAgent.ts");
 
-  assert.match(source, /solo del día de hoy/);
-  assert.match(source, /no hay semana ni mes/);
+  assert.match(source, /get_sales_summary/);
+  assert.match(source, /periodo='dia'/);
+  assert.match(source, /dias_atras/);
   assert.match(source, /Código de barras escaneado/);
   assert.match(source, /boliviano \(Bs\.\)/);
   assert.match(source, /Nunca uses \$.*USD/);

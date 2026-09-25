@@ -58,9 +58,11 @@ const waveStyles = StyleSheet.create({
   bar: { width: 6, height: 30, borderRadius: 3, backgroundColor: colors.primary },
 });
 
+const VOICE_AUTO_SEND_DELAY_MS = 15_000;
+
 /**
  * Modo voz fluido estilo ChatGPT: orbe central reactivo,
- * detección de fin de voz con auto-envío inmediato al detener o terminar de hablar.
+ * detección de fin de voz con auto-envío tras una pausa configurable.
  */
 export function VoiceModeOverlay({
   visible,
@@ -105,7 +107,7 @@ export function VoiceModeOverlay({
           if (!isCancelledRef.current) {
             onSend();
           }
-        }, 350);
+        }, VOICE_AUTO_SEND_DELAY_MS);
       }
     }
 
@@ -230,7 +232,7 @@ export function VoiceModeOverlay({
               : recording
                 ? "Escuchando… tocá el orbe para enviar o terminá de hablar"
                 : transcript.trim()
-                  ? "Enviando mensaje…"
+                  ? `Enviando en ${Math.round(VOICE_AUTO_SEND_DELAY_MS / 1000)} s… tocá «Enviar ahora» si querés mandarlo ya`
                   : canTalk
                     ? "Tocá el orbe y empezá a hablar"
                     : "Texto reconocido"}

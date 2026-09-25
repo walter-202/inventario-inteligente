@@ -13,12 +13,20 @@ import { emptyAssistantChat, hydrateAssistantChat, saveAssistantChat } from "../
 import { getPreferredMode, setPreferredMode, type PreferredMode } from "../../../shared/lib/secureKeyStore";
 import { colors, spacing } from "../../../shared/theme";
 import { formatearPrecio } from "../../../shared/lib/utils";
+import { formatSalesPeriodLabel } from "../../dashboard/api/dashboardApi";
 import { useSucursales } from "../../../shared/hooks/useSucursales";
+import { useActiveBranch } from "../../../shared/hooks/useActiveBranch";
 import { useStockMultiSucursal } from "../../inventario/hooks/useStockMultiSucursal";
 import { useProcesarVenta } from "../../ventas/hooks/useProcesarVenta";
 import { useRegistrarProducto } from "../../productos/hooks/useRegistrarProducto";
 import { useVoiceCommand } from "../hooks/useVoiceCommand";
-import { aggregateVoiceLines } from "../lib/voiceLines";
+import {
+  buildRegistroProductoConfirmInput,
+  esCancelacionRegistroProducto,
+  esConfirmacionRegistroProducto,
+  mergeRegistroProductoParsed,
+} from "../lib/productRegistrationFlow";
+import { aggregateVoiceLines, mergeConfirmationLines } from "../lib/voiceLines";
 import {
   chatInicial,
   chatReducer,
@@ -28,6 +36,7 @@ import {
   type ObjetivoSesion,
 } from "../lib/chatSession";
 import {
+  consultarKardexDe,
   consultarStockDe,
   type LineaInterpretada,
   type ResultadoInterpretacion,
@@ -96,9 +105,19 @@ export function VoiceCommandView() {
   const [inspectingId, setInspectingId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const { activeBranchId, canChangeBranch, selectBranch } = useActiveBranch();
   const [branchId, setBranchId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (activeBranchId !== null) setBranchId(activeBranchId);
+  }, [activeBranchId]);
   const [pendingConfirmation, setPendingConfirmation] = useState<VentaConfirmationLine[] | null>(null);
+  const [pendingConfirmationMessageId, setPendingConfirmationMessageId] = useState<string | null>(null);
+  const pendingConfirmationMessageIdRef = useRef<string | null>(null);
   const [pendingRegistration, setPendingRegistration] = useState<RegistroProductoParsed | null>(null);
+  const [pendingRegistrationMessageId, setPendingRegistrationMessageId] = useState<string | null>(null);
+  const pendingRegistrationMessageIdRef = useRef<string | null>(null);
+  const pendingRegistrationRef = useRef<RegistroProductoParsed | null>(null);
   const [shortage, setShortage] = useState<{ messageId: string; lines: LineaConStock[] } | null>(null);
   const [papelera, setPapelera] = useState<{ session: ChatSession; messages: ChatMessage[] } | null>(null);
   const [lastLines, setLastLines] = useState<LineaInterpretada[]>([]);
@@ -127,6 +146,10 @@ export function VoiceCommandView() {
   }, []);
 
   useEffect(() => {
+    pendingRegistrationRef.current = pendingRegistration;
+  }, [pendingRegistration]);
+
+  useEffect(() => {
     let cancelled = false;
     persistedUserRef.current = userId;
     hydratedUserRef.current = null;
@@ -136,8 +159,13 @@ export function VoiceCommandView() {
     transcriptRef.current = "";
     voice.setTranscript("");
     setStreamDraft(null);
+    pendingConfirmationMessageIdRef.current = null;
     setPendingConfirmation(null);
+    setPendingConfirmationMessageId(null);
     setPendingRegistration(null);
+    setPendingRegistrationMessageId(null);
+    pendingRegistrationMessageIdRef.current = null;
+    pendingRegistrationRef.current = null;
     setShortage(null);
     setLastLines([]);
     if (!userId) {
@@ -223,6 +251,117 @@ export function VoiceCommandView() {
     if (objetivo !== "indefinido") dispatch({ type: "fijar-objetivo", sessionId, objetivo, updatedAt: ahora() });
   };
 
+  const limpiarPropuestaRegistro = () => {
+    setPendingRegistration(null);
+    setPendingRegistrationMessageId(null);
+    pendingRegistrationMessageIdRef.current = null;
+    pendingRegistrationRef.current = null;
+  };
+
+  const limpiarCarritoVenta = () => {
+    setPendingConfirmation(null);
+    setPendingConfirmationMessageId(null);
+    pendingConfirmationMessageIdRef.current = null;
+  };
+
+  const publicarConfirmacionVenta = (
+    sessionId: string,
+    lines: VentaConfirmationLine[],
+    options?: { thoughts?: string[]; durationMs?: number; fueCorreccion?: boolean },
+  ) => {
+    const productoCount = lines.length;
+    const unidadCount = lines.reduce((sum, line) => sum + line.cantidad, 0);
+    const detalle = lines.map((line) => `${line.cantidad} × ${line.nombre}`).join(", ");
+    const texto =
+      productoCount > 1
+        ? `Carrito con ${productoCount} productos (${unidadCount} uds) en ${branchName}: ${detalle}. Confirmá, agregá otro o cargá al carrito:`
+        : options?.fueCorreccion
+          ? `Tomé tu corrección: ${detalle}. Podés confirmar, agregar otro producto o cargar al carrito.`
+          : `Entendí esto para ${branchName}. Podés confirmar la venta, agregar otro producto o cargarla al carrito:`;
+    const attachment = { kind: "confirmacion-venta" as const, lines };
+    const activeMessageId = pendingConfirmationMessageIdRef.current;
+    if (activeMessageId) {
+      dispatch({
+        type: "actualizar-mensaje",
+        sessionId,
+        messageId: activeMessageId,
+        patch: { texto, attachment, tone: "info" },
+        updatedAt: ahora(),
+      });
+    } else {
+      const messageId = nextId("msg");
+      pendingConfirmationMessageIdRef.current = messageId;
+      setPendingConfirmationMessageId(messageId);
+      dispatch({
+        type: "agregar-mensaje",
+        sessionId,
+        message: {
+          id: messageId,
+          role: "asistente",
+          tone: "info",
+          texto,
+          thoughts: options?.thoughts,
+          durationMs: options?.durationMs,
+          attachment,
+        },
+        updatedAt: ahora(),
+      });
+    }
+    scrollToEnd();
+  };
+
+  const publicarPropuestaRegistro = (
+    sessionId: string,
+    datos: RegistroProductoParsed,
+    options?: { mensaje: string; thoughts?: string[]; durationMs?: number },
+  ) => {
+    if (activeBranch === null) return;
+    const merged = mergeRegistroProductoParsed(pendingRegistrationRef.current, datos);
+    pendingRegistrationRef.current = merged;
+    setPendingRegistration(merged);
+    const attachment = {
+      kind: "registro-producto" as const,
+      datos: merged,
+      branchId: activeBranch,
+      branchName,
+    };
+    const activeMessageId = pendingRegistrationMessageIdRef.current;
+    if (activeMessageId) {
+      dispatch({
+        type: "actualizar-mensaje",
+        sessionId,
+        messageId: activeMessageId,
+        patch: {
+          texto: options?.mensaje ?? "Revisá y confirmá el alta del producto en la tarjeta.",
+          attachment,
+          tone: "info",
+          thoughts: options?.thoughts,
+          durationMs: options?.durationMs,
+        },
+        updatedAt: ahora(),
+      });
+    } else {
+      const messageId = nextId("msg");
+      pendingRegistrationMessageIdRef.current = messageId;
+      setPendingRegistrationMessageId(messageId);
+      dispatch({
+        type: "agregar-mensaje",
+        sessionId,
+        message: {
+          id: messageId,
+          role: "asistente",
+          tone: "info",
+          texto: options?.mensaje ?? "Revisá y confirmá el alta del producto en la tarjeta.",
+          thoughts: options?.thoughts,
+          durationMs: options?.durationMs,
+          attachment,
+        },
+        updatedAt: ahora(),
+      });
+    }
+    scrollToEnd();
+  };
+
   const procesarLineasVenta = (
     sessionId: string,
     lineas: LineaInterpretada[],
@@ -276,24 +415,28 @@ export function VoiceCommandView() {
       scrollToEnd();
       return;
     }
-    setPendingConfirmation(
-      withStock.map((line) => ({
-        producto_id: line.producto.id,
-        nombre: line.producto.nombre,
-        cantidad: line.cantidadSolicitada,
-        precio: line.producto.precio,
-      })),
-    );
-    agregar(sessionId, {
-      role: "asistente",
-      tone: "info",
-      texto: fueCorreccion
-        ? `Tomé tu corrección: ${withStock.map((line) => `${line.cantidadSolicitada} × ${line.producto.nombre}`).join(", ")}. Podés confirmar o cargar al carrito.`
-        : `Entendí esto para ${branchName}. Podés confirmar la venta directa o cargarla al carrito de ventas:`,
-      thoughts,
-      durationMs,
-      attachment: { kind: "confirmacion-venta" },
-    });
+    let confirmationLines: VentaConfirmationLine[];
+    try {
+      confirmationLines = mergeConfirmationLines(
+        pendingConfirmation ?? [],
+        withStock.map((line) => ({
+          producto_id: line.producto.id,
+          nombre: line.producto.nombre,
+          cantidad: line.cantidadSolicitada,
+          precio: line.producto.precio,
+        })),
+      );
+    } catch (error) {
+      agregar(sessionId, {
+        role: "asistente",
+        tone: "warning",
+        texto: error instanceof Error ? error.message : "No pude combinar los productos del carrito.",
+      });
+      return;
+    }
+    setPendingConfirmation(confirmationLines);
+    fijarObjetivo(sessionId, "venta");
+    publicarConfirmacionVenta(sessionId, confirmationLines, { thoughts, durationMs, fueCorreccion });
   };
 
   const aplicarMaximoDisponible = (sessionId: string) => {
@@ -306,24 +449,35 @@ export function VoiceCommandView() {
       agregar(sessionId, { role: "asistente", tone: "info", texto: `Sin stock disponible en ${branchName}.` });
       return;
     }
-    setPendingConfirmation(
-      capped.map((line) => ({
-        producto_id: line.producto.id,
-        nombre: line.producto.nombre,
-        cantidad: line.cantidadSolicitada,
-        precio: line.producto.precio,
-      })),
-    );
-    agregar(sessionId, {
-      role: "asistente",
-      tone: "info",
-      texto: "Ajusté a lo disponible. Revisá y confirmá o cargá al carrito.",
-      attachment: { kind: "confirmacion-venta" },
-    });
+    const confirmationLines = capped.map((line) => ({
+      producto_id: line.producto.id,
+      nombre: line.producto.nombre,
+      cantidad: line.cantidadSolicitada,
+      precio: line.producto.precio,
+    }));
+    setPendingConfirmation(confirmationLines);
+    publicarConfirmacionVenta(sessionId, confirmationLines, { fueCorreccion: true });
   };
 
-  const elegirCandidato = async (sessionId: string, producto: Producto, intento: IntentoDesambiguacion) => {
+  const elegirCandidato = async (
+    sessionId: string,
+    producto: Producto,
+    intento: IntentoDesambiguacion,
+    sourceMessageId?: string,
+  ) => {
     agregar(sessionId, { role: "usuario", texto: `Elegí ${producto.nombre} (${producto.codigo})` });
+    if (sourceMessageId) {
+      const source = chat.messages[sessionId]?.find((message) => message.id === sourceMessageId);
+      if (source?.attachment?.kind === "candidatos") {
+        dispatch({
+          type: "actualizar-mensaje",
+          sessionId,
+          messageId: sourceMessageId,
+          patch: { attachment: { ...source.attachment, resolved: true } },
+          updatedAt: ahora(),
+        });
+      }
+    }
     if (intento.accion === "venta") {
       procesarLineasVenta(
         sessionId,
@@ -332,6 +486,44 @@ export function VoiceCommandView() {
         [`Producto seleccionado: ${producto.nombre} (${producto.codigo})`],
         150,
       );
+      return;
+    }
+    if (intento.accion === "consulta_kardex") {
+      if (!assistantScope) return;
+      try {
+        const consulta = await consultarKardexDe(
+          producto,
+          { sucursal: intento.sucursal, tipo: intento.tipo },
+          undefined,
+          assistantScope,
+        );
+        agregar(sessionId, {
+          role: "asistente",
+          tone: consulta.resumen.total ? "success" : "info",
+          texto: consulta.mensaje,
+          thoughts: [`Desambiguado a: ${producto.nombre} (${producto.codigo})`, "Consultando kardex del producto"],
+          durationMs: 200,
+          attachment: {
+            kind: "consulta-kardex",
+            productoNombre: consulta.productoNombre,
+            tipoMovimiento: consulta.tipoMovimiento,
+            movimientos: consulta.movimientos,
+            resumen: consulta.resumen,
+          },
+        });
+        dispatch({
+          type: "fijar-resumen",
+          sessionId,
+          resumen: `Kardex ${producto.nombre}: ${consulta.resumen.total} mov.`,
+          updatedAt: ahora(),
+        });
+      } catch (error) {
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "error",
+          texto: error instanceof Error ? error.message : "No se pudo consultar el kardex.",
+        });
+      }
       return;
     }
     try {
@@ -376,9 +568,35 @@ export function VoiceCommandView() {
       setFailedDraft(null);
       agregar(sessionId, { role: "usuario", texto });
     }
-    setPendingConfirmation(null);
-    setPendingRegistration(null);
     setShortage(null);
+    if (pendingRegistrationRef.current && activeBranch !== null) {
+      if (esCancelacionRegistroProducto(texto)) {
+        limpiarPropuestaRegistro();
+        agregar(sessionId, { role: "asistente", tone: "info", texto: "Alta de producto cancelada. Podés dictar otra operación." });
+        requestLifecycleRef.current.finish(request);
+        return;
+      }
+      if (esConfirmacionRegistroProducto(texto)) {
+        const input = buildRegistroProductoConfirmInput(pendingRegistrationRef.current, activeBranch);
+        if (!input) {
+          agregar(sessionId, {
+            role: "asistente",
+            tone: "info",
+            texto: "Completá precio y nombre en la tarjeta de alta y tocá «Dar de alta», o dictame los datos que faltan.",
+          });
+          requestLifecycleRef.current.finish(request);
+          return;
+        }
+        if (!canExecuteAssistantWrite(profile, "products.write", input.sucursal_id)) {
+          agregar(sessionId, { role: "asistente", tone: "error", texto: "Tu permiso o sucursal actual ya no permiten registrar este producto." });
+          requestLifecycleRef.current.finish(request);
+          return;
+        }
+        confirmarAltaProducto(input);
+        requestLifecycleRef.current.finish(request);
+        return;
+      }
+    }
     const startTime = Date.now();
     const activeMessages = chat.messages[sessionId] ?? [];
     const historial = retryDraft?.history ?? activeMessages.map((m) => ({
@@ -422,6 +640,7 @@ export function VoiceCommandView() {
         voice.setTranscript("");
       }
       if (result.tipo === "aclaracion") {
+        if (!isRetryableAssistantResult(result)) limpiarCarritoVenta();
         agregar(sessionId, {
           role: "asistente",
           tone: "info",
@@ -432,6 +651,7 @@ export function VoiceCommandView() {
         return;
       }
       if (result.tipo === "conversacion") {
+        limpiarCarritoVenta();
         agregar(sessionId, {
           role: "asistente",
           tone: "info",
@@ -442,28 +662,21 @@ export function VoiceCommandView() {
         return;
       }
       if (result.tipo === "registro_producto") {
+        limpiarCarritoVenta();
         if (activeBranch === null) {
           agregar(sessionId, { role: "asistente", tone: "error", texto: "No tenés una sucursal habilitada para registrar productos." });
           return;
         }
         fijarObjetivo(sessionId, "registro");
-        setPendingRegistration(result.datos);
-        agregar(sessionId, {
-          role: "asistente",
-          tone: "info",
-          texto: result.mensaje,
+        publicarPropuestaRegistro(sessionId, result.datos, {
+          mensaje: result.mensaje,
           thoughts: result.pasosPensamiento,
           durationMs,
-          attachment: {
-            kind: "registro-producto",
-            datos: result.datos,
-            branchId: activeBranch,
-            branchName,
-          },
         });
         return;
       }
       if (result.tipo === "buscar_producto") {
+        limpiarCarritoVenta();
         fijarObjetivo(sessionId, "consulta");
         agregar(sessionId, {
           role: "asistente",
@@ -477,6 +690,7 @@ export function VoiceCommandView() {
         return;
       }
       if (result.tipo === "consulta_bajo_stock") {
+        limpiarCarritoVenta();
         fijarObjetivo(sessionId, "consulta");
         agregar(sessionId, {
           role: "asistente",
@@ -490,6 +704,7 @@ export function VoiceCommandView() {
         return;
       }
       if (result.tipo === "listar_inventario") {
+        limpiarCarritoVenta();
         fijarObjetivo(sessionId, "consulta");
         agregar(sessionId, {
           role: "asistente",
@@ -515,7 +730,62 @@ export function VoiceCommandView() {
         });
         return;
       }
+      if (result.tipo === "consulta_rotacion") {
+        limpiarCarritoVenta();
+        fijarObjetivo(sessionId, "consulta");
+        agregar(sessionId, {
+          role: "asistente",
+          tone: "success",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: {
+            kind: "consulta-rotacion",
+            dias: result.diasAnalizados,
+            totalUnidades: result.totalUnidadesVendidas,
+            totalIngresos: result.totalIngresos,
+            capitalInmovilizado: result.capitalInmovilizado,
+            items: result.items,
+            insights: result.insights.map((insight) => ({ titulo: insight.titulo, descripcion: insight.descripcion })),
+          },
+        });
+        dispatch({
+          type: "fijar-resumen",
+          sessionId,
+          resumen: `Rotación ${result.diasAnalizados}d: ${result.totalUnidadesVendidas} u.`,
+          updatedAt: ahora(),
+        });
+        return;
+      }
+      if (result.tipo === "consulta_kardex") {
+        limpiarCarritoVenta();
+        fijarObjetivo(sessionId, "consulta");
+        agregar(sessionId, {
+          role: "asistente",
+          tone: result.resumen.total ? "success" : "info",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: {
+            kind: "consulta-kardex",
+            productoNombre: result.productoNombre,
+            tipoMovimiento: result.tipoMovimiento,
+            movimientos: result.movimientos,
+            resumen: result.resumen,
+          },
+        });
+        dispatch({
+          type: "fijar-resumen",
+          sessionId,
+          resumen: result.productoNombre
+            ? `Kardex ${result.productoNombre}: ${result.resumen.total} mov.`
+            : `Kardex: ${result.resumen.total} mov.`,
+          updatedAt: ahora(),
+        });
+        return;
+      }
       if (result.tipo === "consulta_stock" || result.tipo === "consulta_ventas") {
+        limpiarCarritoVenta();
         fijarObjetivo(sessionId, "consulta");
         if (result.tipo === "consulta_stock") {
           agregar(sessionId, {
@@ -540,12 +810,18 @@ export function VoiceCommandView() {
             texto: result.mensaje,
             thoughts: result.pasosPensamiento,
             durationMs,
-            attachment: { kind: "consulta-ventas", totalVentas: result.totalVentas, cantidadVentas: result.cantidadVentas },
+            attachment: {
+              kind: "consulta-ventas",
+              totalVentas: result.totalVentas,
+              cantidadVentas: result.cantidadVentas,
+              periodo: result.periodo,
+              diasAtras: result.diasAtras,
+            },
           });
           dispatch({
             type: "fijar-resumen",
             sessionId,
-            resumen: `Ventas hoy ${formatearPrecio(result.totalVentas)}`,
+            resumen: `Ventas ${formatSalesPeriodLabel(result.periodo, result.diasAtras)} ${formatearPrecio(result.totalVentas)}`,
             updatedAt: ahora(),
           });
         }
@@ -597,6 +873,8 @@ export function VoiceCommandView() {
         onSuccess: () => {
           const resumen = `Venta ${pendingConfirmation.map((line) => `${line.cantidad}× ${line.nombre}`).join(", ")} · ${branchName}`;
           setPendingConfirmation(null);
+          pendingConfirmationMessageIdRef.current = null;
+          setPendingConfirmationMessageId(null);
           setLastLines([]);
           agregar(sessionId, {
             role: "asistente",
@@ -659,6 +937,8 @@ export function VoiceCommandView() {
       updatedAt: ahora(),
     });
     setPendingConfirmation(null);
+    pendingConfirmationMessageIdRef.current = null;
+    setPendingConfirmationMessageId(null);
     voice.setTranscript("");
     router.push("/nueva-venta");
   };
@@ -666,6 +946,7 @@ export function VoiceCommandView() {
   const confirmarAltaProducto = (input: {
     nombre: string;
     codigo: string;
+    codigo_barra?: string | null;
     categoria: string;
     precio: number;
     cantidad: number;
@@ -681,6 +962,7 @@ export function VoiceCommandView() {
       {
         nombre: input.nombre,
         codigo: input.codigo,
+        codigo_barra: input.codigo_barra ?? null,
         categoria: input.categoria,
         precio: input.precio,
         cantidad: input.cantidad,
@@ -688,7 +970,7 @@ export function VoiceCommandView() {
       },
       {
         onSuccess: (creado) => {
-          setPendingRegistration(null);
+          limpiarPropuestaRegistro();
           agregar(sessionId, {
             role: "asistente",
             tone: "success",
@@ -718,14 +1000,14 @@ export function VoiceCommandView() {
   };
 
   const abrirFormularioAlta = () => {
-    setPendingRegistration(null);
+    limpiarPropuestaRegistro();
     router.push("/registrar-producto");
   };
 
   const cancelarConfirmacion = () => {
     const sessionId = chat.activeSessionId;
-    setPendingConfirmation(null);
-    if (sessionId) agregar(sessionId, { role: "asistente", tone: "info", texto: "Venta en pausa. Podés dictar otra operación." });
+    limpiarCarritoVenta();
+    if (sessionId) agregar(sessionId, { role: "asistente", tone: "info", texto: "Carrito vacío. Podés dictar otra operación o empezar una venta nueva." });
   };
 
   const nuevaSesion = () => {
@@ -735,8 +1017,8 @@ export function VoiceCommandView() {
     transcriptRef.current = "";
     voice.setTranscript("");
     setInspectingId(null);
-    setPendingConfirmation(null);
-    setPendingRegistration(null);
+    limpiarCarritoVenta();
+    limpiarPropuestaRegistro();
     setShortage(null);
     setDrawerOpen(false);
     const session: ChatSession = {
@@ -787,7 +1069,7 @@ export function VoiceCommandView() {
       voice.setTranscript("");
     }
     if (inspectingId === sessionId) setInspectingId(null);
-    if (pendingConfirmation && chat.activeSessionId === sessionId) setPendingConfirmation(null);
+    if (pendingConfirmation && chat.activeSessionId === sessionId) limpiarCarritoVenta();
     dispatch({ type: "eliminar-sesion", sessionId });
   };
 
@@ -859,7 +1141,12 @@ export function VoiceCommandView() {
           label="Sucursal"
           branches={allowedBranches}
           value={activeBranch}
-          onChange={(id) => { if (id !== undefined && assistantScope.allowedBranchIds.includes(id)) setBranchId(id); }}
+          onChange={(id) => {
+            if (id !== undefined && assistantScope.allowedBranchIds.includes(id)) {
+              setBranchId(id);
+              if (canChangeBranch) selectBranch(id);
+            }
+          }}
         />
         <SessionBar active={activeSession} />
         {inspectingId && visibleSession ? (
@@ -935,6 +1222,8 @@ export function VoiceCommandView() {
             visibleMessages.map((message) => {
               const candidatos = message.attachment?.kind === "candidatos" ? message.attachment : null;
               const listaInventario = message.attachment?.kind === "lista-inventario" ? message.attachment : null;
+              const consultaRotacion = message.attachment?.kind === "consulta-rotacion" ? message.attachment : null;
+              const consultaKardex = message.attachment?.kind === "consulta-kardex" ? message.attachment : null;
               return (
               <ChatMessageBubble
                 key={message.id}
@@ -945,26 +1234,35 @@ export function VoiceCommandView() {
                     : undefined
                 }
               >
-                {candidatos && visibleSessionId && !inspectingId ? (
+                {candidatos && visibleSessionId && !inspectingId && !candidatos.resolved ? (
                   <CandidatePicker
                     candidatos={candidatos.candidatos}
                     stockLocal={stockLocalPorProducto}
                     branchName={branchName}
                     disabled={voice.interpreting || sale.isPending}
-                    onSelect={(producto) => void elegirCandidato(visibleSessionId, producto, candidatos.intento)}
+                    onSelect={(producto) => void elegirCandidato(visibleSessionId, producto, candidatos.intento, message.id)}
                   />
                 ) : null}
-                {message.attachment?.kind === "confirmacion-venta" && pendingConfirmation && visibleSessionId && !inspectingId ? (
+                {message.attachment?.kind === "confirmacion-venta"
+                  && message.attachment.lines.length > 0
+                  && message.id === pendingConfirmationMessageId
+                  && visibleSessionId
+                  && !inspectingId ? (
                   <SaleConfirmationCard
                     branchName={branchName}
-                    lines={pendingConfirmation}
+                    lines={message.attachment.lines}
                     loading={sale.isPending}
                     onConfirm={confirmarVenta}
                     onCancel={cancelarConfirmacion}
+                    onAddMore={() => voice.setTranscript("Agregar ")}
                     onSendToCart={cargarAlCarrito}
                   />
                 ) : null}
-                {message.attachment?.kind === "registro-producto" && pendingRegistration && visibleSessionId && !inspectingId ? (
+                {message.attachment?.kind === "registro-producto"
+                  && pendingRegistration
+                  && message.id === pendingRegistrationMessageId
+                  && visibleSessionId
+                  && !inspectingId ? (
                   <ProductRegistrationCard
                     initialData={pendingRegistration}
                     branchName={message.attachment.branchName}
@@ -973,7 +1271,7 @@ export function VoiceCommandView() {
                     canWrite={canWriteProducts}
                     onConfirm={confirmarAltaProducto}
                     onOpenForm={abrirFormularioAlta}
-                    onCancel={() => setPendingRegistration(null)}
+                    onCancel={limpiarPropuestaRegistro}
                   />
                 ) : null}
                 {message.attachment?.kind === "consulta-stock" ? (
@@ -994,7 +1292,8 @@ export function VoiceCommandView() {
                   <Text variant="headlineSmall" style={styles.queryTotal}>
                     {formatearPrecio(message.attachment.totalVentas)}
                     <Text variant="bodySmall" style={styles.queryBranch}>
-                      {"  "}· {message.attachment.cantidadVentas} venta(s) hoy
+                      {"  "}· {message.attachment.cantidadVentas} venta(s){" "}
+                      {formatSalesPeriodLabel(message.attachment.periodo ?? "hoy", message.attachment.diasAtras)}
                     </Text>
                   </Text>
                 ) : null}
@@ -1042,6 +1341,46 @@ export function VoiceCommandView() {
                         +{listaInventario.filas.length - 8} producto(s) más
                       </Text>
                     ) : null}
+                  </View>
+                ) : null}
+                {consultaRotacion ? (
+                  <View style={styles.queryCard}>
+                    <Text variant="labelSmall" style={styles.queryMeta}>
+                      {consultaRotacion.dias} días · {consultaRotacion.totalUnidades} u. vendidas · Bs. {consultaRotacion.totalIngresos.toFixed(2)} · inmovilizado Bs. {consultaRotacion.capitalInmovilizado.toFixed(2)}
+                    </Text>
+                    {consultaRotacion.items.slice(0, 5).map((item) => (
+                      <View key={`${item.codigo}-${item.nombre}`} style={styles.queryRow}>
+                        <View style={styles.queryCopy}>
+                          <Text variant="bodySmall" style={styles.queryBranch}>{item.nombre}</Text>
+                          <Text variant="labelSmall" style={styles.queryMeta}>{item.codigo} · {item.clasificacion} rotación</Text>
+                        </View>
+                        <Text variant="labelMedium" style={styles.queryQty}>{item.unidadesVendidas} v / {item.stockActual} stk</Text>
+                      </View>
+                    ))}
+                    {consultaRotacion.insights.slice(0, 2).map((insight) => (
+                      <Text key={insight.titulo} variant="labelSmall" style={styles.queryMeta}>
+                        {insight.titulo}: {insight.descripcion}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+                {consultaKardex ? (
+                  <View style={styles.queryCard}>
+                    <Text variant="labelSmall" style={styles.queryMeta}>
+                      {consultaKardex.productoNombre ? `${consultaKardex.productoNombre} · ` : ""}
+                      {consultaKardex.resumen.total} mov. · +{consultaKardex.resumen.entradas} / -{consultaKardex.resumen.salidas}
+                    </Text>
+                    {consultaKardex.movimientos.slice(0, 6).map((mov) => (
+                      <View key={`${mov.fecha}-${mov.productoCodigo}-${mov.cantidad}`} style={styles.queryRow}>
+                        <View style={styles.queryCopy}>
+                          <Text variant="bodySmall" style={styles.queryBranch}>{mov.productoNombre}</Text>
+                          <Text variant="labelSmall" style={styles.queryMeta}>
+                            {mov.tipo}{mov.subtipo ? ` · ${mov.subtipo}` : ""}{mov.saldoResultante !== undefined ? ` · saldo ${mov.saldoResultante}` : ""}
+                          </Text>
+                        </View>
+                        <Text variant="labelMedium" style={styles.queryQty}>{mov.cantidad} uds</Text>
+                      </View>
+                    ))}
                   </View>
                 ) : null}
               </ChatMessageBubble>

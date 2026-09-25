@@ -31,7 +31,9 @@ const CONTEXT_ABILITIES: Ability[] = [
 
 export function allowedAssistantBranches(profile: UserProfile | null | undefined, branches: AssistantBranch[]): AssistantBranch[] {
   if (!profile || !can(profile.rol, "ai.read")) return [];
-  return branches.filter((branch) => canUseBranch(profile.rol, "ai.read", branch.id, profile.sucursal_id));
+  return branches.filter((branch) =>
+    canUseBranch(profile.rol, "ai.read", branch.id, profile.sucursal_id, profile.sucursal_ids),
+  );
 }
 
 /** Never selects a global branch outside the authenticated user's AI scope. */
@@ -76,5 +78,7 @@ export function canExecuteAssistantWrite(
   ability: Extract<Ability, "products.write" | "sales.write">,
   branchId: number | null | undefined,
 ): boolean {
-  return Boolean(profile && canUseBranch(profile.rol, ability, branchId, profile.sucursal_id));
+  return Boolean(
+    profile && canUseBranch(profile.rol, ability, branchId, profile.sucursal_id, profile.sucursal_ids),
+  );
 }

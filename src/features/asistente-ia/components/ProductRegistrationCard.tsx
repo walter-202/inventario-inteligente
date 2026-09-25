@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Button, Divider, Surface, Text, TextInput } from "react-native-paper";
 import { Layers, PackagePlus, Store, Tag } from "lucide-react-native";
@@ -43,8 +43,17 @@ export function ProductRegistrationCard({
   const [codigo, setCodigo] = useState(initialData.codigo ?? "");
   const [codigoBarra, setCodigoBarra] = useState(initialData.codigo_barra ?? "");
   const [categoria, setCategoria] = useState(initialData.categoria ?? "Ropa");
-  const [precio, setPrecio] = useState(initialData.precio ? String(initialData.precio) : "");
-  const [cantidad, setCantidad] = useState(initialData.cantidad ? String(initialData.cantidad) : "1");
+  const [precio, setPrecio] = useState(initialData.precio != null ? String(initialData.precio) : "");
+  const [cantidad, setCantidad] = useState(initialData.cantidad != null ? String(initialData.cantidad) : "1");
+
+  useEffect(() => {
+    setNombre(initialData.nombre ?? "");
+    setCodigo(initialData.codigo ?? "");
+    setCodigoBarra(initialData.codigo_barra ?? "");
+    setCategoria(initialData.categoria ?? "Ropa");
+    setPrecio(initialData.precio != null ? String(initialData.precio) : "");
+    setCantidad(initialData.cantidad != null ? String(initialData.cantidad) : "1");
+  }, [initialData]);
 
   const numPrecio = Number(precio.replace(",", "."));
   const numCantidad = Number.parseInt(cantidad, 10);
@@ -139,7 +148,7 @@ export function ProductRegistrationCard({
 
       {!canWrite ? (
         <Text variant="bodySmall" style={styles.errorText}>
-          Tu rol no tiene permiso para crear productos en catálogo (requiere Admin o Almacén).
+          Tu rol no tiene permiso para crear productos en catálogo (requiere Almacén).
         </Text>
       ) : null}
 

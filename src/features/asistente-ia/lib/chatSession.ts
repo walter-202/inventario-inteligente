@@ -19,7 +19,8 @@ export type ChatTone = "info" | "success" | "warning" | "error";
 /** De dónde viene una desambiguación: qué hacer con el producto elegido. */
 export type IntentoDesambiguacion =
   | { accion: "venta"; cantidad: number }
-  | { accion: "consulta_stock"; sucursal?: string };
+  | { accion: "consulta_stock"; sucursal?: string }
+  | { accion: "consulta_kardex"; sucursal?: string; tipo?: "entrada" | "salida" | "todas" };
 
 export interface StockRow {
   sucursal: string;
@@ -27,11 +28,30 @@ export interface StockRow {
 }
 
 export type ChatAttachment =
-  | { kind: "candidatos"; texto: string; intento: IntentoDesambiguacion; candidatos: Producto[] }
-  | { kind: "confirmacion-venta" }
+  | { kind: "candidatos"; texto: string; intento: IntentoDesambiguacion; candidatos: Producto[]; resolved?: boolean }
+  | {
+      kind: "confirmacion-venta";
+      lines: Array<{ producto_id: number; nombre: string; cantidad: number; precio: number }>;
+    }
   | { kind: "registro-producto"; datos: RegistroProductoParsed; branchId: number; branchName: string }
   | { kind: "consulta-stock"; productoNombre: string; filas: StockRow[]; total: number }
-  | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number }
+  | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number; periodo?: "hoy" | "semana" | "mes" | "dia"; diasAtras?: number }
+  | {
+      kind: "consulta-rotacion";
+      dias: number;
+      totalUnidades: number;
+      totalIngresos: number;
+      capitalInmovilizado: number;
+      items: Array<{ nombre: string; codigo: string; unidadesVendidas: number; stockActual: number; clasificacion: string }>;
+      insights: Array<{ titulo: string; descripcion: string }>;
+    }
+  | {
+      kind: "consulta-kardex";
+      productoNombre?: string;
+      tipoMovimiento: "entrada" | "salida" | "todas";
+      movimientos: Array<{ fecha: string; productoNombre: string; productoCodigo: string; tipo: string; cantidad: number; saldoResultante?: number }>;
+      resumen: { entradas: number; salidas: number; transferencias: number; total: number };
+    }
   | { kind: "busqueda-productos"; consulta: string; productos: Producto[] }
   | { kind: "stock-bajo"; productos: DashboardLowStockItem[] }
   | { kind: "lista-inventario"; minStock: number; filas: Array<{ nombre: string; codigo: string; cantidad: number }> };
@@ -74,6 +94,13 @@ export type ChatAction =
   | { type: "fijar-objetivo"; sessionId: string; objetivo: ObjetivoSesion; updatedAt: number }
   | { type: "fijar-resumen"; sessionId: string; resumen: string; updatedAt: number }
   | { type: "agregar-mensaje"; sessionId: string; message: ChatMessage; updatedAt: number }
+  | {
+      type: "actualizar-mensaje";
+      sessionId: string;
+      messageId: string;
+      patch: Partial<Pick<ChatMessage, "texto" | "attachment" | "tone">>;
+      updatedAt: number;
+    }
   | { type: "completar-sesion"; sessionId: string; resumen: string; updatedAt: number }
   | { type: "cancelar-sesion"; sessionId: string; updatedAt: number }
   | { type: "reanudar-sesion"; sessionId: string; updatedAt: number }
@@ -148,6 +175,24 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: {
           ...state.messages,
           [action.sessionId]: [...(state.messages[action.sessionId] ?? []), action.message].slice(-MAX_CHAT_MESSAGES),
+        },
+      };
+    }
+    case "actualizar-mensaje": {
+      const session = state.sessions.find((item) => item.id === action.sessionId);
+      if (!session || session.estado !== "activa") return state;
+      const messages = state.messages[action.sessionId];
+      if (!messages?.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        sessions: state.sessions.map((item) =>
+          item.id === action.sessionId ? { ...item, updatedAt: action.updatedAt } : item,
+        ),
+        messages: {
+          ...state.messages,
+          [action.sessionId]: messages.map((message) =>
+            message.id === action.messageId ? { ...message, ...action.patch } : message,
+          ),
         },
       };
     }
