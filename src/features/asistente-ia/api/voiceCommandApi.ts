@@ -8,7 +8,7 @@ import type {
   RotacionClasificacion,
   Sucursal,
 } from "../../../shared/types/domain";
-import { buscarProductoPorCodigo, buscarProductosAsistente } from "../../productos/api/productosApi";
+import { buscarProductoPorCodigo, buscarProductosAsistente, buscarProductosLexicamente } from "../../productos/api/productosApi";
 import { ProductoNoEncontradoError } from "../../productos/lib/productLookupErrors";
 import {
   extraTerminosBusquedaProducto,
@@ -20,12 +20,21 @@ import {
 } from "../lib/productMatching";
 import type { IntentoDesambiguacion } from "../lib/chatSession";
 import type { AssistantScopeContext } from "../lib/assistantAuthorization";
+import type { AssistantAnalysisReport } from "./assistantAnalyticsApi";
 import { obtenerStockDeProducto, obtenerInventario, obtenerStockMultiSucursal } from "../../inventario/api/inventarioApi";
 import { obtenerAnalisisRotacion, type OpcionesAnalisisRotacion } from "../../analitica/api/rotacionApi";
 import { obtenerDashboardMetrics, obtenerVentasPorPeriodo, type SalesQueryPeriod } from "../../dashboard/api/dashboardApi";
 import { obtenerKardexMovimientos } from "../../inventario/api/kardexApi";
 import { obtenerSucursales } from "../../../shared/api/sucursalesApi";
 import type { RegistroProductoParsed } from "./voiceRegistrationService";
+import {
+  obtenerAnalisisInventarioAsistente,
+  obtenerAnalisisVentasAsistente,
+  type AssistantInventoryAnalysis,
+  type AssistantInventoryAnalysisOptions,
+  type AssistantSalesAnalysis,
+  type AssistantSalesAnalysisOptions,
+} from "./assistantAnalyticsApi";
 export type { SalesQueryPeriod } from "../../dashboard/api/dashboardApi";
 
 export class InterpretacionError extends Error {
@@ -74,7 +83,8 @@ export interface StockListItem {
 
 export interface AssistantReadApi {
   findProductByCode(codigo: string): Promise<Producto>;
-  searchProducts(query: string, limit: number): Promise<Producto[]>;
+  searchProducts(query: string, limit: number, alternatives?: string[]): Promise<Producto[]>;
+  searchProductsLexically?(query: string, limit: number): Promise<Producto[]>;
   stockForProduct(productoId: number): Promise<StockSucursalDetalle[]>;
   getBranches(): Promise<Sucursal[]>;
   getSalesSummary(
@@ -82,6 +92,8 @@ export interface AssistantReadApi {
     sucursalId?: number,
     diasAtras?: number,
   ): Promise<{ totalSales: number; salesCount: number; periodo: SalesQueryPeriod; diasAtras?: number }>;
+  getSalesAnalysis(options: AssistantSalesAnalysisOptions): Promise<AssistantSalesAnalysis>;
+  getInventoryAnalysis(options: AssistantInventoryAnalysisOptions): Promise<AssistantInventoryAnalysis>;
   getRotationAnalysis(options?: OpcionesAnalisisRotacion): Promise<AnalisisRotacionResumen>;
   getKardex(filters?: KardexFilterParams): Promise<MovimientoKardexItem[]>;
   getLowStock(sucursalId?: number): Promise<DashboardLowStockItem[]>;
@@ -153,9 +165,12 @@ export { getAssistantSalesSummary };
 export const defaultAssistantReadApi: AssistantReadApi = {
   findProductByCode: buscarProductoPorCodigo,
   searchProducts: buscarProductosAsistente,
+  searchProductsLexically: buscarProductosLexicamente,
   stockForProduct: obtenerStockDeProducto,
   getBranches: obtenerSucursales,
   getSalesSummary: getAssistantSalesSummary,
+  getSalesAnalysis: obtenerAnalisisVentasAsistente,
+  getInventoryAnalysis: obtenerAnalisisInventarioAsistente,
   getRotationAnalysis: obtenerAnalisisRotacion,
   getKardex: obtenerKardexMovimientos,
   getLowStock: async (sucursalId) => (await obtenerDashboardMetrics(sucursalId)).lowStock,
@@ -165,6 +180,7 @@ export const defaultAssistantReadApi: AssistantReadApi = {
 export type ResultadoInterpretacion =
   | { tipo: "aclaracion"; mensaje: string; pasosPensamiento?: string[]; retryable?: boolean }
   | { tipo: "conversacion"; mensaje: string; pasosPensamiento?: string[] }
+  | { tipo: "consulta_analitica"; mensaje: string; reports: AssistantAnalysisReport[]; pasosPensamiento?: string[] }
   | { tipo: "registro_producto"; datos: RegistroProductoParsed; mensaje: string; pasosPensamiento?: string[] }
   | { tipo: "venta"; lineas: LineaInterpretada[]; fueCorreccion?: boolean; pasosPensamiento?: string[] }
   | {
@@ -274,20 +290,30 @@ export async function searchProductsWithVariants(
   query: string,
   readApi: AssistantReadApi,
   limit = 12,
+  alternatives: string[] = [],
 ): Promise<Producto[]> {
   const seen = new Map<number, Producto>();
-  let foundPhrase = false;
+  const variants = variantesBusquedaProducto(query);
+  const primaryTerm = variants[0] ?? query;
+  const queryAlternatives = [...new Set(alternatives.map((term) => term.trim()).filter(Boolean))].slice(0, 4);
+  const primaryProducts = await readApi.searchProducts(primaryTerm, limit, queryAlternatives);
+  for (const product of primaryProducts) seen.set(product.id, product);
 
-  for (const term of variantesBusquedaProducto(query)) {
-    const products = await readApi.searchProducts(term, limit);
-    for (const product of products) seen.set(product.id, product);
-    if (products.length > 0) foundPhrase = true;
+  // The edge function has already searched and merged the model's Spanish query expansion.
+  // Do not issue extra lexical requests unless the hybrid backend is unavailable.
+  const hybridResults = primaryProducts.some((product) => "lexical_score" in product);
+  if (!hybridResults) {
+    const lexicalSearch = readApi.searchProductsLexically ?? readApi.searchProducts;
+    for (const term of [...variants.slice(1), ...queryAlternatives]) {
+      const products = await lexicalSearch(term, limit);
+      for (const product of products) seen.set(product.id, product);
+    }
   }
 
-  if (!foundPhrase) {
+  if (!hybridResults && seen.size === 0) {
     const tokenLimit = Math.max(limit, 24);
     for (const term of extraTerminosBusquedaProducto(query)) {
-      const products = await readApi.searchProducts(term, tokenLimit);
+      const products = await (readApi.searchProductsLexically ?? readApi.searchProducts)(term, tokenLimit);
       for (const product of products) seen.set(product.id, product);
     }
   }
@@ -297,7 +323,11 @@ export async function searchProductsWithVariants(
   return [...seen.values()].slice(0, limit);
 }
 
-export async function resolverCoincidencia(text: string, readApi: AssistantReadApi): Promise<CoincidenciaProducto> {
+export async function resolverCoincidencia(
+  text: string,
+  readApi: AssistantReadApi,
+  alternatives: string[] = [],
+): Promise<CoincidenciaProducto> {
   const query = text.trim();
   if (!query) return { kind: "none" };
 
@@ -320,7 +350,7 @@ export async function resolverCoincidencia(text: string, readApi: AssistantReadA
 
   let products: Producto[] = [];
   try {
-    products = await searchProductsWithVariants(query, readApi, 12);
+    products = await searchProductsWithVariants(query, readApi, 12, alternatives);
   } catch {
     throw new InterpretacionError("No se pudo buscar el producto. Revisá tu conexión y volvé a intentar.");
   }
@@ -328,6 +358,23 @@ export async function resolverCoincidencia(text: string, readApi: AssistantReadA
   const match = matchProduct(products, query);
   if (match.kind === "match") return { kind: "match", product: match.product };
   if (match.kind === "ambiguous") return { kind: "candidatos", products: match.products };
+
+  const matchesById = new Map<number, Producto>();
+  const ambiguousById = new Map<number, Producto>();
+  for (const alternative of alternatives) {
+    const alternativeMatch = matchProduct(products, alternative);
+    if (alternativeMatch.kind === "match") matchesById.set(alternativeMatch.product.id, alternativeMatch.product);
+    if (alternativeMatch.kind === "ambiguous") {
+      for (const product of alternativeMatch.products) ambiguousById.set(product.id, product);
+    }
+  }
+  if (matchesById.size === 1 && ambiguousById.size === 0) {
+    return { kind: "match", product: [...matchesById.values()][0] };
+  }
+  const alternativeCandidates = new Map([...matchesById, ...ambiguousById]);
+  if (alternativeCandidates.size > 0) {
+    return { kind: "candidatos", products: [...alternativeCandidates.values()] };
+  }
   return { kind: "none" };
 }
 
@@ -457,7 +504,7 @@ export async function consultarKardexDe(
     tipo?: "entrada" | "salida" | "todas";
     limite?: number;
   },
-  readApi: AssistantReadApi,
+  readApi: AssistantReadApi = defaultAssistantReadApi,
   scope: AssistantScopeContext,
 ): Promise<Extract<ResultadoInterpretacion, { tipo: "consulta_kardex" }>> {
   const branch = await resolveScopedBranch(options.sucursal, readApi, scope);

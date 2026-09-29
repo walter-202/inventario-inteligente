@@ -4,6 +4,11 @@ import type { Producto } from "../../../shared/types/domain";
 import { normalizarMonedaAsistente } from "../../../shared/lib/utils";
 import type { AssistantScopeContext } from "./assistantAuthorization";
 import type { IntentoDesambiguacion } from "./chatSession";
+import type {
+  AssistantAnalysisReport,
+  AssistantInventoryGroupBy,
+  AssistantSalesGroupBy,
+} from "../api/assistantAnalyticsApi";
 import {
   buildConsultaKardexResult,
   consultarStockDe,
@@ -36,6 +41,8 @@ export const TOOL_ABILITIES = {
   list_low_stock: "inventory.read",
   list_inventory: "inventory.read",
   get_sales_summary: "sales.read",
+  analyze_sales: "sales.read",
+  analyze_inventory: "inventory.read",
   get_rotation_analysis: "dashboard.read",
   get_kardex: "inventory.read",
   propose_sale: "sales.write",
@@ -67,18 +74,73 @@ function unknownBranch(solicitada: string): AssistantToolError {
   );
 }
 
+function assistantLocalDate(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/La_Paz",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function resolveAnalysisDateRange(from?: string | null, to?: string | null): { from: string; to: string } {
+  const today = assistantLocalDate();
+  const end = to ?? today;
+  const startDate = new Date(`${(from ?? end)}T00:00:00.000Z`);
+  if (!from) startDate.setUTCDate(startDate.getUTCDate() - 29);
+  if (!Number.isFinite(startDate.getTime())) throw new Error("La fecha de inicio no es válida.");
+  return { from: startDate.toISOString().slice(0, 10), to: end };
+}
+
+function formatAnalysisCurrency(value: number): string {
+  return `Bs. ${value.toFixed(2)}`;
+}
+
+const productAlternativesSchema = z.array(z.string().trim().min(1).max(80)).max(4).nullable().optional();
+
+async function resolveCanonicalProductFilter(
+  query: string | null | undefined,
+  alternatives: string[] | null | undefined,
+  readApi: AssistantReadApi,
+): Promise<{ query?: string; error?: AssistantToolError }> {
+  const requested = query?.trim();
+  if (!requested) return {};
+  const result = await resolverCoincidencia(requested, readApi, alternatives ?? []);
+  if (result.kind === "match") return { query: result.product.nombre };
+  if (result.kind === "candidatos") {
+    const names = result.products.slice(0, 5).map((product) => `${product.nombre} (${product.codigo})`).join(", ");
+    return {
+      error: toolError(
+        "ambiguous_product",
+        `El filtro "${requested}" coincide con varios productos: ${names}.`,
+        "Acotá el análisis a un producto concreto o a una categoría.",
+      ),
+    };
+  }
+  return {
+    error: toolError(
+      "product_not_found",
+      `No encontré "${requested}" en el catálogo para usarlo como filtro.`,
+      "Probá con search_products y usá el nombre del producto que aparezca en el catálogo.",
+    ),
+  };
+}
+
 export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<string, AssistantToolDefinition> {
   const readApi = ctx.readApi ?? defaultAssistantReadApi;
   const scope = ctx.scope;
   const all: Record<AssistantToolName, AssistantToolDefinition> = {
     search_products: {
       description:
-        "Busca productos del catálogo por nombre aproximado, categoría o SKU. Usala cuando el usuario pregunta qué hay o no hay coincidencia. NO la uses para vender (usá propose_sale) ni para stock de un producto ya identificado (usá get_stock). Podés pasar el nombre que dijo el usuario; la búsqueda tolera plurales y de/para.",
+        "Busca productos del catálogo por intención, nombre aproximado, categoría o SKU. Usala cuando el usuario describe un producto sin usar exactamente su nombre de catálogo; traduce conceptos cotidianos a prendas probables (por ejemplo 'algo abrigado' → suéter, chompa, chaqueta) y envía hasta 4 alternativas pertinentes, junto con el texto original. La búsqueda combina las variantes semánticas propuestas por el agente con texto completo, similitud de palabras y coincidencia exacta de SKU/código de barras. NO la uses para vender (usá propose_sale) ni para consultar stock de un producto ya identificado (usá get_stock).",
       inputSchema: z.object({
         query: z.string().trim().min(1).describe("Nombre (aunque sea aproximado), categoría o SKU."),
+        alternativas: productAlternativesSchema.describe("Hasta 4 sinónimos o variantes de escritura pertinentes en español."),
       }),
-      execute: async ({ query }) => {
-        const productos = await searchProductsWithVariants(query, readApi, 12);
+      execute: async ({ query, alternativas }) => {
+        const productos = await searchProductsWithVariants(query, readApi, 12, alternativas ?? []);
         return {
           kind: "buscar_producto",
           consulta: query,
@@ -95,12 +157,13 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
         "Consulta el stock de UN producto ya identificado por nombre o SKU. Usala para 'cuánto me queda de labiales'. NO la uses para listar todo el inventario (list_inventory) ni para stock bajo (list_low_stock).",
       inputSchema: z.object({
         query: z.string().trim().min(1).describe("Nombre o SKU del producto"),
+        alternativas: productAlternativesSchema.describe("Sinónimos regionales o variantes del nombre si el usuario usó una palabra distinta al catálogo."),
         sucursal: z.string().trim().min(1).nullable().optional().describe("Sucursal mencionada, o null"),
       }),
-      execute: async ({ query, sucursal }) => {
+      execute: async ({ query, alternativas, sucursal }) => {
         const branch = await resolveScopedBranch(sucursal, readApi, scope);
         if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
-        const coincidencia = await resolverCoincidencia(query, readApi);
+        const coincidencia = await resolverCoincidencia(query, readApi, alternativas ?? []);
         if (coincidencia.kind === "candidatos") {
           return {
             kind: "desambiguacion",
@@ -186,6 +249,52 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
         };
       },
     },
+    analyze_inventory: {
+      description:
+        "Consulta y agrega el inventario con datos de Supabase. Usala para análisis por producto, categoría o sucursal, valor referencial, unidades o alertas de mínimo. Elegí group_by según la pregunta y solo_bajo_minimo=true si piden faltantes/reposición. El valor estimado usa el precio de venta del catálogo, no el costo contable. La sucursal activa se aplica por defecto, salvo que un administrador pida agrupar por sucursal sin indicar una sucursal específica: en ese caso compara todas las sucursales.",
+      inputSchema: z.object({
+        group_by: z.enum(["producto", "categoria", "sucursal"]).nullable().optional(),
+        sucursal: z.string().trim().min(1).nullable().optional(),
+        solo_bajo_minimo: z.boolean().nullable().optional(),
+        categoria: z.string().trim().min(1).max(100).nullable().optional(),
+        producto: z.string().trim().min(1).max(100).nullable().optional(),
+        alternativas_producto: productAlternativesSchema.describe("Sinónimos regionales del producto para resolverlo contra el catálogo."),
+        limite: z.number().int().min(1).max(20).nullable().optional(),
+      }),
+      execute: async ({ group_by, sucursal, solo_bajo_minimo, categoria, producto, alternativas_producto, limite }) => {
+        const groupBy: AssistantInventoryGroupBy = group_by ?? "categoria";
+        const todasLasSucursales = groupBy === "sucursal" && !sucursal?.trim() && scope.role === "admin";
+        const branch = todasLasSucursales
+          ? { kind: "ok" as const, branchId: undefined, branchName: undefined }
+          : await resolveScopedBranch(sucursal, readApi, scope);
+        if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
+        const productFilter = await resolveCanonicalProductFilter(producto, alternativas_producto, readApi);
+        if (productFilter.error) return productFilter.error;
+        const analysis = await readApi.getInventoryAnalysis({
+          groupBy,
+          sucursalId: branch.branchId,
+          soloBajoMinimo: solo_bajo_minimo ?? false,
+          limite: limite ?? 10,
+          categoria: categoria ?? undefined,
+          producto: productFilter.query,
+        });
+        const scopeLabel = branch.branchName
+          ?? (todasLasSucursales ? "Todas las sucursales habilitadas" : scope.activeBranchName ?? "Sucursal activa");
+        const branchLabel = ` en ${scopeLabel}`;
+        const top = analysis.rows.slice(0, 5).map((row) =>
+          `${row.key}: ${row.stock_units} u., ${formatAnalysisCurrency(row.estimated_value)}`,
+        ).join("; ");
+        const filters = [categoria ? `categoría ${categoria}` : null, productFilter.query ? `producto ${productFilter.query}` : null].filter(Boolean).join(", ");
+        const filterLabel = filters ? ` Filtros: ${filters}.` : "";
+        const message = `Inventario${branchLabel}: ${analysis.summary.products} productos con stock, ${analysis.summary.stock_units} unidades, valor referencial ${formatAnalysisCurrency(analysis.summary.estimated_value)} y ${analysis.summary.below_minimum} registros bajo mínimo.${filterLabel} ${top ? `Principales grupos por ${groupBy}: ${top}.` : "No hay filas para este filtro."} El valor usa precios de catálogo, no costos de compra.`;
+        return {
+          kind: "consulta_analitica",
+          message,
+          analysis,
+          scopeLabel,
+        };
+      },
+    },
     get_sales_summary: {
       description:
         "Resumen de ventas por periodo. periodo='hoy' = día actual; 'semana' = últimos 7 días; 'mes' = mes calendario actual; 'dia' = un solo día calendario con dias_atras (0=hoy, 1=ayer, 3=hace 3 días). Para 'y hace 3 días?' o 'ventas de ayer' usá periodo='dia' con dias_atras correcto; NO uses 'semana' salvo que pidan explícitamente la semana o últimos 7 días. Si mencionan otra sucursal, pasala; si no, usá la sucursal activa.",
@@ -225,6 +334,72 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           periodo: metrics.periodo,
           diasAtras: metrics.diasAtras,
           mensaje: `Ventas ${periodoTexto} ${sucursalText}: Bs. ${metrics.totalSales.toFixed(2)} (${metrics.salesCount} transacción${metrics.salesCount === 1 ? "" : "es"}).`,
+        };
+      },
+    },
+    analyze_sales: {
+      description:
+        "Construye un plan de consulta de ventas y devuelve agregados calculados en PostgreSQL: rango de fechas, sucursal, métrica y agrupación por día, producto, categoría, medio de pago o sucursal. Usala para preguntas comparativas o con varias condiciones (por ejemplo, qué categorías crecieron, mejores productos del mes, tendencia semanal o ventas por sucursal). La agrupación entre sucursales requiere rol administrador y sin filtro de sucursal compara todas. Los rangos son inclusivos y el máximo es 365 días. Si comparan, compara automáticamente con el período inmediatamente anterior de igual duración. Se excluyen ventas anuladas.",
+      inputSchema: z.object({
+        desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+        hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+        group_by: z.enum(["dia", "producto", "categoria", "metodo_pago", "sucursal"]).nullable().optional(),
+        comparar_periodo_anterior: z.boolean().nullable().optional(),
+        sucursal: z.string().trim().min(1).nullable().optional(),
+        categoria: z.string().trim().min(1).max(100).nullable().optional(),
+        producto: z.string().trim().min(1).max(100).nullable().optional(),
+        alternativas_producto: productAlternativesSchema.describe("Sinónimos regionales del producto para resolverlo contra el catálogo."),
+        medio_pago: z.enum(["efectivo", "QR", "tarjeta", "transferencia"]).nullable().optional(),
+        limite: z.number().int().min(1).max(20).nullable().optional(),
+      }),
+      execute: async ({ desde, hasta, group_by, comparar_periodo_anterior, sucursal, categoria, producto, alternativas_producto, medio_pago, limite }) => {
+        const groupBy: AssistantSalesGroupBy = group_by ?? "dia";
+        if (groupBy === "sucursal" && scope.role !== "admin") {
+          return toolError(
+            "admin_required",
+            "El desglose de ventas entre sucursales está reservado para administradores.",
+            "Consulta las ventas de una sucursal habilitada o agrupa por categoría, producto, día o medio de pago.",
+          );
+        }
+        const compararSucursales = groupBy === "sucursal" && !sucursal?.trim() && scope.role === "admin";
+        const branch = compararSucursales
+          ? { kind: "ok" as const, branchId: undefined, branchName: undefined }
+          : await resolveScopedBranch(sucursal, readApi, scope);
+        if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
+        const productFilter = await resolveCanonicalProductFilter(producto, alternativas_producto, readApi);
+        if (productFilter.error) return productFilter.error;
+        const range = resolveAnalysisDateRange(desde, hasta);
+        const analysis = await readApi.getSalesAnalysis({
+          desde: range.from,
+          hasta: range.to,
+          groupBy,
+          sucursalId: branch.branchId,
+          compararPeriodoAnterior: comparar_periodo_anterior ?? false,
+          limite: limite ?? 10,
+          categoria: categoria ?? undefined,
+          producto: productFilter.query,
+          metodoPago: medio_pago ?? undefined,
+        });
+        const scopeLabel = branch.branchName
+          ?? (compararSucursales ? "Todas las sucursales habilitadas" : scope.activeBranchName ?? "Sucursal activa");
+        const branchLabel = ` en ${scopeLabel}`;
+        const summary = analysis.summary;
+        const change = analysis.previous_summary
+          ? analysis.previous_summary.revenue > 0
+            ? ` Variación contra ${analysis.previous_from}–${analysis.previous_to}: ${(((summary.revenue - analysis.previous_summary.revenue) / analysis.previous_summary.revenue) * 100).toFixed(1)}%.`
+            : ` El período anterior registró ${formatAnalysisCurrency(analysis.previous_summary.revenue)}.`
+          : "";
+        const top = analysis.rows.slice(0, 5).map((row) =>
+          `${row.key}: ${formatAnalysisCurrency(row.revenue)}, ${row.transactions} transacciones, ${row.units} u.`,
+        ).join("; ");
+        const filters = [categoria ? `categoría ${categoria}` : null, productFilter.query ? `producto ${productFilter.query}` : null, medio_pago ? `medio de pago ${medio_pago}` : null].filter(Boolean).join(", ");
+        const filterLabel = filters ? ` Filtros: ${filters}.` : "";
+        const message = `Ventas del ${analysis.from} al ${analysis.to}${branchLabel}: ${formatAnalysisCurrency(summary.revenue)}, ${summary.transactions} transacciones, ${summary.units} unidades y ticket promedio ${formatAnalysisCurrency(summary.average_ticket)}.${change}${filterLabel} ${top ? `Desglose por ${groupBy}: ${top}.` : "No hay detalle para este rango."}`;
+        return {
+          kind: "consulta_analitica",
+          message,
+          analysis,
+          scopeLabel,
         };
       },
     },
@@ -289,11 +464,12 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
         "Consulta el historial de movimientos de inventario (kardex). Usala para 'últimos movimientos', 'entradas/salidas de X' o 'historial del producto'. NO registra movimientos. Si piden un producto, pasá query; si no, devuelve los movimientos recientes de la sucursal.",
       inputSchema: z.object({
         query: z.string().trim().min(1).nullable().optional(),
+        alternativas: productAlternativesSchema.describe("Sinónimos regionales o variantes del nombre del producto."),
         sucursal: z.string().trim().min(1).nullable().optional(),
         tipo: z.enum(["entrada", "salida", "todas"]).nullable().optional(),
         limite: z.number().int().min(1).max(50).nullable().optional(),
       }),
-      execute: async ({ query, sucursal, tipo, limite }) => {
+      execute: async ({ query, alternativas, sucursal, tipo, limite }) => {
         const branch = await resolveScopedBranch(sucursal, readApi, scope);
         if (branch.kind === "unknown") return unknownBranch(branch.solicitada);
         const tipoMovimiento = tipo ?? "todas";
@@ -301,7 +477,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
         const trimmedQuery = query?.trim();
 
         if (trimmedQuery) {
-          const coincidencia = await resolverCoincidencia(trimmedQuery, readApi);
+          const coincidencia = await resolverCoincidencia(trimmedQuery, readApi, alternativas ?? []);
           if (coincidencia.kind === "candidatos") {
             return {
               kind: "desambiguacion",
@@ -355,6 +531,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
           .array(
             z.object({
               query: z.string().trim().min(1).describe("Nombre aproximado o SKU"),
+              alternativas: productAlternativesSchema.describe("Sinónimos regionales si el nombre del catálogo es distinto al usado por la persona."),
               cantidad: z.number().int().positive(),
             }),
           )
@@ -363,7 +540,7 @@ export function createAssistantToolExecutors(ctx: AssistantToolContext): Record<
       execute: async ({ items }) => {
         const lineas: LineaInterpretada[] = [];
         for (const item of items) {
-          const coincidencia = await resolverCoincidencia(item.query, readApi);
+          const coincidencia = await resolverCoincidencia(item.query, readApi, item.alternativas ?? []);
           if (coincidencia.kind === "candidatos") {
             return {
               kind: "desambiguacion",
@@ -458,6 +635,34 @@ export function mapToolOutputsToResult(
   thoughts: string[],
 ): ResultadoInterpretacion {
   const text = normalizarMonedaAsistente(modelText.trim());
+  const reports = outputs.flatMap((entry): AssistantAnalysisReport[] => {
+    if (!entry || isToolError(entry.output) || !entry.output || typeof entry.output !== "object") return [];
+    const output = entry.output as Record<string, unknown>;
+    if (taggedKind(output, entry.toolName) !== "consulta_analitica" || !output.analysis || typeof output.analysis !== "object") return [];
+    const analysis = output.analysis as AssistantAnalysisReport["analysis"];
+    if (analysis.dataset !== "sales" && analysis.dataset !== "inventory") return [];
+    return [{
+      analysis,
+      scopeLabel: stringField(output, "scopeLabel") ?? "Sucursal habilitada",
+    }];
+  }).slice(0, 6);
+  if (reports.length > 0) {
+    let fallbackMessage: string | undefined;
+    for (let index = outputs.length - 1; index >= 0; index -= 1) {
+      const entry = outputs[index];
+      if (!entry || isToolError(entry.output) || !entry.output || typeof entry.output !== "object") continue;
+      if (taggedKind(entry.output, entry.toolName) === "consulta_analitica") {
+        fallbackMessage = stringField(entry.output, "message");
+        break;
+      }
+    }
+    return {
+      tipo: "consulta_analitica",
+      mensaje: text || fallbackMessage || "Preparé el análisis con los datos disponibles.",
+      reports,
+      pasosPensamiento: thoughts,
+    };
+  }
   for (let index = outputs.length - 1; index >= 0; index -= 1) {
     const entry = outputs[index];
     if (!entry || isToolError(entry.output)) continue;
@@ -465,6 +670,14 @@ export function mapToolOutputsToResult(
     if (!output || typeof output !== "object") continue;
     const kind = taggedKind(output, entry.toolName);
     const mensaje = text || stringField(output, "mensaje") || "";
+
+    if (kind === "consulta_analitica" && "analysis" in output) {
+      return {
+        tipo: "conversacion",
+        mensaje: mensaje || stringField(output, "message") || "La consulta terminó, pero no llegó un resumen de los resultados.",
+        pasosPensamiento: thoughts,
+      };
+    }
 
     if (kind === "venta" && "lineas" in output && Array.isArray(output.lineas) && output.lineas.length > 0) {
       return { tipo: "venta", lineas: output.lineas as LineaInterpretada[], pasosPensamiento: thoughts };

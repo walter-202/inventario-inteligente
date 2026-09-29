@@ -148,31 +148,63 @@ export async function buscarProductoPorId(id: number): Promise<Producto> {
   return data as Producto;
 }
 
-export async function buscarProductosAsistente(query: string, limite = 10): Promise<Producto[]> {
+export async function buscarProductosAsistente(
+  query: string,
+  limite = 10,
+  alternativas: string[] = [],
+): Promise<Producto[]> {
   const q = query.trim();
   if (!q) return [];
+  const safeLimit = z.number().int().min(1).max(50).catch(10).parse(limite);
+  const safeAlternatives = [...new Set(alternativas
+    .map((term) => term.trim().slice(0, 80))
+    .filter(Boolean))].slice(0, 4);
 
-  // Búsqueda rápida por código exacto o prefijo (soporta SKU y código de barras)
-  const { data: codeMatches, error: codeErr } = await supabase
-    .from("productos")
-    .select("*")
-    .or(`codigo.ilike.${q}%,codigo.ilike.%${q}%,codigo_barra.ilike.${q}%,codigo_barra.ilike.%${q}%`)
-    .limit(limite);
-
-  if (codeErr) throw new Error(codeErr.message);
-  if (codeMatches && codeMatches.length > 0) {
-    return codeMatches as Producto[];
+  try {
+    const { data, error } = await supabase.functions.invoke("assistant-product-search", {
+      body: { mode: "search", query: q.slice(0, 256), queryVariants: safeAlternatives, limit: safeLimit },
+    });
+    if (!error && data && Array.isArray(data.products)) {
+      const hybridProducts = data.products as Producto[];
+      if (hybridProducts.length > 0) return hybridProducts;
+    }
+  } catch {
+    // Keep the assistant usable when the hybrid search function is not deployed.
   }
 
-  // Búsqueda por nombre o categoría
-  const { data: textMatches, error: textErr } = await supabase
-    .from("productos")
-    .select("*")
-    .or(`nombre.ilike.%${q}%,categoria.ilike.%${q}%`)
-    .limit(limite);
+  const seen = new Map<number, Producto>();
+  for (const term of [q, ...safeAlternatives]) {
+    for (const product of await buscarProductosLexicamente(term, safeLimit)) seen.set(product.id, product);
+    if (seen.size >= safeLimit * 3) break;
+  }
+  return [...seen.values()].slice(0, safeLimit);
+}
 
-  if (textErr) throw new Error(textErr.message);
-  return (textMatches ?? []) as Producto[];
+export async function buscarProductosLexicamente(query: string, limit: number): Promise<Producto[]> {
+  const escapeLike = (value: string) => value.replace(/[\\%_]/g, "\\$&");
+  const terms = [...new Set([
+    query.trim(),
+    ...query.split(/\s+/).filter((word) => word.length >= 3).sort((left, right) => right.length - left.length).slice(0, 2),
+  ])].slice(0, 3);
+  const seen = new Map<number, Producto>();
+
+  for (const term of terms) {
+    const pattern = `%${escapeLike(term)}%`;
+    const results = await Promise.all([
+      supabase.from("productos").select("*").ilike("nombre", pattern).limit(limit),
+      supabase.from("productos").select("*").ilike("categoria", pattern).limit(limit),
+      supabase.from("productos").select("*").ilike("subcategoria", pattern).limit(limit),
+      supabase.from("productos").select("*").ilike("codigo", pattern).limit(limit),
+      supabase.from("productos").select("*").ilike("codigo_barra", pattern).limit(limit),
+    ]);
+    for (const result of results) {
+      if (result.error) throw new Error(result.error.message);
+      for (const row of result.data ?? []) seen.set(row.id, row as Producto);
+    }
+    if (seen.size >= limit * 3) break;
+  }
+
+  return [...seen.values()].slice(0, limit);
 }
 
 export async function obtenerCategoriasProductos(): Promise<string[]> {

@@ -1,5 +1,6 @@
 import type { DashboardLowStockItem, Producto } from "../../../shared/types/domain";
 import type { RegistroProductoParsed } from "../api/voiceRegistrationService";
+import type { AssistantAnalysisReport } from "../api/assistantAnalyticsApi";
 
 /**
  * Chat conversacional del asistente con sesiones de vida corta.
@@ -36,6 +37,7 @@ export type ChatAttachment =
   | { kind: "registro-producto"; datos: RegistroProductoParsed; branchId: number; branchName: string }
   | { kind: "consulta-stock"; productoNombre: string; filas: StockRow[]; total: number }
   | { kind: "consulta-ventas"; totalVentas: number; cantidadVentas: number; periodo?: "hoy" | "semana" | "mes" | "dia"; diasAtras?: number }
+  | { kind: "informe-analitico"; reports: AssistantAnalysisReport[] }
   | {
       kind: "consulta-rotacion";
       dias: number;
@@ -49,7 +51,7 @@ export type ChatAttachment =
       kind: "consulta-kardex";
       productoNombre?: string;
       tipoMovimiento: "entrada" | "salida" | "todas";
-      movimientos: Array<{ fecha: string; productoNombre: string; productoCodigo: string; tipo: string; cantidad: number; saldoResultante?: number }>;
+      movimientos: Array<{ fecha: string; productoNombre: string; productoCodigo: string; tipo: string; subtipo?: string; cantidad: number; saldoResultante?: number }>;
       resumen: { entradas: number; salidas: number; transferencias: number; total: number };
     }
   | { kind: "busqueda-productos"; consulta: string; productos: Producto[] }
@@ -98,7 +100,7 @@ export type ChatAction =
       type: "actualizar-mensaje";
       sessionId: string;
       messageId: string;
-      patch: Partial<Pick<ChatMessage, "texto" | "attachment" | "tone">>;
+      patch: Partial<Pick<ChatMessage, "texto" | "attachment" | "tone" | "thoughts" | "durationMs">>;
       updatedAt: number;
     }
   | { type: "completar-sesion"; sessionId: string; resumen: string; updatedAt: number }

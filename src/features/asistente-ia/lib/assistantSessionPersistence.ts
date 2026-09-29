@@ -9,6 +9,7 @@ import {
   type EstadoSesion,
   type ObjetivoSesion,
 } from "./chatSession";
+import { parseAssistantAnalysis } from "../api/assistantAnalyticsApi";
 
 export const MAX_STORED_SESSIONS = MAX_CHAT_SESSIONS;
 export const MAX_STORED_MESSAGES = MAX_CHAT_MESSAGES;
@@ -139,6 +140,9 @@ function persistableAttachment(attachment: ChatAttachment | undefined): ChatAtta
     return { ...attachment, filas: attachment.filas.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
   }
   if (attachment.kind === "consulta-ventas") return attachment;
+  if (attachment.kind === "informe-analitico") {
+    return { ...attachment, reports: attachment.reports.slice(0, 6) };
+  }
   if (attachment.kind === "busqueda-productos") {
     return { ...attachment, productos: attachment.productos.slice(0, MAX_STORED_ATTACHMENT_ROWS) };
   }
@@ -182,6 +186,16 @@ function parseDisplayAttachment(value: unknown): ChatAttachment | undefined {
       periodo,
       ...(periodo === "dia" && diasAtras !== null ? { diasAtras } : {}),
     };
+  }
+  if (value.kind === "informe-analitico") {
+    if (!Array.isArray(value.reports)) return undefined;
+    const reports = value.reports.flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const analysis = parseAssistantAnalysis(item.analysis);
+      const scopeLabel = asNonEmptyString(item.scopeLabel);
+      return analysis && scopeLabel ? [{ analysis, scopeLabel }] : [];
+    }).slice(0, 6);
+    return reports.length > 0 ? { kind: "informe-analitico", reports } : undefined;
   }
   if (value.kind === "busqueda-productos") {
     const consulta = asNonEmptyString(value.consulta);

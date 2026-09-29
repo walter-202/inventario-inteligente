@@ -42,7 +42,7 @@ export function generarInsightsMarketing(
       id: "top-estrella",
       tipo: "estrella",
       titulo: `Prenda Estrella: ${top.nombre}`,
-      descripcion: `Lidera el período con ${top.unidadesVendidas} unidades vendidas y $${top.ingresosTotales.toFixed(2)} generados. Tasa de salida del ${(top.tasaRotacion * 100).toFixed(0)}%.`,
+      descripcion: `Lidera el período con ${top.unidadesVendidas} unidades vendidas y Bs. ${top.ingresosTotales.toFixed(2)} generados. Tasa de salida del ${(top.tasaRotacion * 100).toFixed(0)}%.`,
       productoNombre: top.nombre,
       productoCodigo: top.codigo,
       accionSugerida: "Destacar en la vitrina principal de tienda y promocionar en campañas digitales/redes sociales.",
@@ -77,7 +77,7 @@ export function generarInsightsMarketing(
       id: "stock-estancado-critico",
       tipo: "estancado",
       titulo: `Capital Inmovilizado: ${peor.nombre}`,
-      descripcion: `Tiene ${peor.stockActual} unidades sin rotación significativa en los últimos ${dias} días ($${valorRetenido.toFixed(2)} retenidos).`,
+      descripcion: `Tiene ${peor.stockActual} unidades sin rotación significativa en los últimos ${dias} días (Bs. ${valorRetenido.toFixed(2)} referenciales a precio de catálogo).`,
       productoNombre: peor.nombre,
       productoCodigo: peor.codigo,
       accionSugerida: "Activar descuento flash del 15% al 25% o incluirlo como beneficio en un combo promocional.",
@@ -105,7 +105,7 @@ export function generarInsightsMarketing(
       id: "categoria-lider",
       tipo: "categoria",
       titulo: `Línea de Mayor Tracción: ${topCat}`,
-      descripcion: `Concentra ${stats.unidades} prendas vendidas ($${stats.ingresos.toFixed(2)} en ingresos).`,
+      descripcion: `Concentra ${stats.unidades} prendas vendidas (Bs. ${stats.ingresos.toFixed(2)} en ingresos).`,
       accionSugerida: `Priorizar compras y reposición en la categoría ${topCat} para la próxima colección.`,
       impactoEstimado: "Alineación del inventario con la demanda real del mercado.",
     });
@@ -134,16 +134,20 @@ export async function obtenerAnalisisRotacion(
   });
 
   // 2. Fetch inventory per product (optionally filtered by sucursal)
-  let invQuery = supabase
-    .from("inventarios")
-    .select("producto_id, cantidad, sucursal_id");
-
-  if (opciones.sucursalId !== undefined) {
-    invQuery = invQuery.eq("sucursal_id", z.number().int().positive().parse(opciones.sucursalId));
-  }
-
-  const { data: invRows, error: invError } = await invQuery;
-  if (invError) throw new Error(invError.message);
+  const validatedBranchId = opciones.sucursalId === undefined
+    ? undefined
+    : z.number().int().positive().parse(opciones.sucursalId);
+  const invRows = await fetchAllPages(async (from, to) => {
+    let query = supabase
+      .from("inventarios")
+      .select("producto_id, cantidad, sucursal_id")
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (validatedBranchId !== undefined) query = query.eq("sucursal_id", validatedBranchId);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
 
   const stockMap = new Map<number, number>();
   for (const inv of invRows ?? []) {
@@ -152,18 +156,20 @@ export async function obtenerAnalisisRotacion(
   }
 
   // 3. Fetch sales in date range
-  let salesQuery = supabase
-    .from("ventas")
-    .select("id, fecha, total, estado, sucursal_id")
-    .neq("estado", "anulada")
-    .gte("fecha", cutoffIso);
-
-  if (opciones.sucursalId !== undefined) {
-    salesQuery = salesQuery.eq("sucursal_id", opciones.sucursalId);
-  }
-
-  const { data: salesRows, error: salesError } = await salesQuery;
-  if (salesError) throw new Error(salesError.message);
+  const salesRows = await fetchAllPages(async (from, to) => {
+    let query = supabase
+      .from("ventas")
+      .select("id, fecha, total, estado, sucursal_id")
+      .eq("estado", "completada")
+      .gte("fecha", cutoffIso)
+      .order("fecha", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (validatedBranchId !== undefined) query = query.eq("sucursal_id", validatedBranchId);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
 
   const saleIds = (salesRows ?? []).map((s) => s.id);
 
@@ -174,14 +180,19 @@ export async function obtenerAnalisisRotacion(
     const batchSize = 300;
     for (let i = 0; i < saleIds.length; i += batchSize) {
       const chunk = saleIds.slice(i, i + batchSize);
-      const { data: detRows, error: detError } = await supabase
-        .from("ventas_detalles")
-        .select("producto_id, cantidad, precio")
-        .in("venta_id", chunk);
+      const detRows = await fetchAllPages(async (from, to) => {
+        const { data, error } = await supabase
+          .from("ventas_detalles")
+          .select("producto_id, cantidad, precio")
+          .in("venta_id", chunk)
+          .order("venta_id", { ascending: true })
+          .order("producto_id", { ascending: true })
+          .range(from, to);
+        if (error) throw new Error(error.message);
+        return data ?? [];
+      });
 
-      if (detError) throw new Error(detError.message);
-
-      for (const d of detRows ?? []) {
+      for (const d of detRows) {
         const cur = salesDetailsMap.get(d.producto_id) ?? { unidades: 0, ingresos: 0 };
         cur.unidades += d.cantidad ?? 0;
         cur.ingresos += (d.cantidad ?? 0) * (d.precio ?? 0);

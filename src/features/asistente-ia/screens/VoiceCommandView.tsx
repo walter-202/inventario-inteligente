@@ -58,6 +58,7 @@ import { ChatComposer } from "../components/ChatComposer";
 import { SessionBar } from "../components/SessionBar";
 import { SessionDrawer } from "../components/SessionDrawer";
 import { VoiceModeOverlay } from "../components/VoiceModeOverlay";
+import { AssistantAnalyticsReportCard } from "../components/AssistantAnalyticsReportCard";
 import { establecerRegistroPendiente } from "../../productos/lib/pendienteRegistro";
 import { establecerLotePendiente } from "../../ventas/lib/pendienteVenta";
 
@@ -662,6 +663,27 @@ export function VoiceCommandView() {
         });
         return;
       }
+      if (result.tipo === "consulta_analitica") {
+        limpiarCarritoVenta();
+        fijarObjetivo(sessionId, "consulta");
+        const hasData = result.reports.some(({ analysis }) => analysis.rows.length > 0);
+        agregar(sessionId, {
+          role: "asistente",
+          tone: hasData ? "success" : "info",
+          texto: result.mensaje,
+          thoughts: result.pasosPensamiento,
+          durationMs,
+          attachment: { kind: "informe-analitico", reports: result.reports },
+        });
+        const datasets = result.reports.map(({ analysis }) => analysis.dataset);
+        dispatch({
+          type: "fijar-resumen",
+          sessionId,
+          resumen: `${datasets.includes("sales") ? "Ventas" : "Inventario"}: ${result.reports.length} análisis`,
+          updatedAt: ahora(),
+        });
+        return;
+      }
       if (result.tipo === "registro_producto") {
         limpiarCarritoVenta();
         if (activeBranch === null) {
@@ -1003,12 +1025,12 @@ export function VoiceCommandView() {
   const abrirFormularioAlta = (input: RegistroProductoParsed) => {
     limpiarPropuestaRegistro();
     establecerRegistroPendiente({
-      nombre: input.nombre,
-      codigo: input.codigo,
-      codigo_barra: input.codigo_barra,
-      categoria: input.categoria,
-      precio: input.precio,
-      cantidad: input.cantidad,
+      nombre: input.nombre ?? undefined,
+      codigo: input.codigo ?? undefined,
+      codigo_barra: input.codigo_barra ?? undefined,
+      categoria: input.categoria ?? undefined,
+      precio: input.precio ?? undefined,
+      cantidad: input.cantidad ?? undefined,
     });
     router.push({
       pathname: "/registrar-producto",
@@ -1243,6 +1265,7 @@ export function VoiceCommandView() {
               const listaInventario = message.attachment?.kind === "lista-inventario" ? message.attachment : null;
               const consultaRotacion = message.attachment?.kind === "consulta-rotacion" ? message.attachment : null;
               const consultaKardex = message.attachment?.kind === "consulta-kardex" ? message.attachment : null;
+              const informeAnalitico = message.attachment?.kind === "informe-analitico" ? message.attachment : null;
               return (
               <ChatMessageBubble
                 key={message.id}
@@ -1315,6 +1338,9 @@ export function VoiceCommandView() {
                       {formatSalesPeriodLabel(message.attachment.periodo ?? "hoy", message.attachment.diasAtras)}
                     </Text>
                   </Text>
+                ) : null}
+                {informeAnalitico ? (
+                  <AssistantAnalyticsReportCard reports={informeAnalitico.reports} conclusion={message.texto} />
                 ) : null}
                 {message.attachment?.kind === "busqueda-productos" ? (
                   <View style={styles.queryCard}>

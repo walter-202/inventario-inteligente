@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { supabase } from "../../../shared/lib/supabase";
 import {
   setApiKey,
@@ -14,6 +15,12 @@ export interface UserCloudAISecrets {
   custom_models: Record<string, string>;
 }
 
+const userCloudAISecretsSchema = z.object({
+  keys: z.record(z.string(), z.string()).default({}),
+  preferred_mode: z.enum(["openrouter", "groq", "cerebras", "gemini", "mistral", "ollama", "sambanova", "auto", "heuristic"]).catch("auto"),
+  custom_models: z.record(z.string(), z.string()).default({}),
+});
+
 /**
  * Downloads and synchronizes user-scoped AI keys from Supabase Vault into local secure storage.
  * Fails gracefully if offline or table/RPC is unreachable.
@@ -23,7 +30,7 @@ export async function syncAIKeysFromCloud(): Promise<boolean> {
     const { data, error } = await supabase.rpc("get_user_ai_secrets");
     if (error || !data) return false;
 
-    const payload = data as UserCloudAISecrets;
+    const payload = userCloudAISecretsSchema.parse(data);
 
     // Synchronize keys
     if (payload.keys && typeof payload.keys === "object") {

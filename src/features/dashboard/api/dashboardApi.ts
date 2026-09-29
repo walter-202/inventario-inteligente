@@ -67,6 +67,7 @@ export async function obtenerVentasPorPeriodo(
     let salesQuery = supabase
       .from("ventas")
       .select("id, total, fecha, sucursal_id")
+      .eq("estado", "completada")
       .gte("fecha", startInclusive.toISOString())
       .lt("fecha", endExclusive.toISOString())
       .order("fecha", { ascending: true })
@@ -104,6 +105,7 @@ export async function obtenerDashboardMetrics(sucursalId?: number, now = new Dat
     let salesQuery = supabase
       .from("ventas")
       .select("id, total, fecha, sucursal_id")
+      .eq("estado", "completada")
       .gte("fecha", firstDay)
       .lt("fecha", endExclusive)
       .order("fecha", { ascending: true })

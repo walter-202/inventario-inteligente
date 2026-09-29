@@ -1,4 +1,4 @@
-import { isStepCount, streamText, tool, type ModelMessage } from "ai";
+import { isStepCount, ToolLoopAgent, tool, type ModelMessage, type ToolSet } from "ai";
 import type { AssistantScopeContext } from "../lib/assistantAuthorization";
 import {
   ASSISTANT_CONFIG_MESSAGE,
@@ -40,26 +40,38 @@ export function buildAssistantInstructions(scope: AssistantScopeContext): string
   const sucursales = scope.allowedBranchNames.length
     ? scope.allowedBranchNames.join(", ")
     : "ninguna";
+  const today = new Intl.DateTimeFormat("es-BO", {
+    dateStyle: "long",
+    timeZone: "America/La_Paz",
+  }).format(new Date());
   return [
     "Sos el asistente de Lidemoda, un punto de venta de moda.",
-    "Respondé en español rioplatense, breve y natural.",
-    "Usá las tools para consultar datos reales. No inventes productos, precios, stock ni sucursales.",
+    "Respondé en español natural de Bolivia, con claridad y en el nivel de detalle que pida la persona.",
+    `La fecha local de negocio es ${today} (America/La_Paz). Interpretá con ella expresiones relativas como hoy, ayer, esta semana o este mes.`,
+    "Consultá datos reales antes de afirmar cifras. Sintetizá los resultados de Supabase y aclará el rango, sucursal y métrica; nunca inventes productos, precios, stock, ventas ni sucursales.",
+    "Para una pregunta analítica, definí qué dato se consulta, el rango de fechas, la sucursal, la métrica y la agrupación. Usa analyze_sales para ventas por día, producto, categoría, medio de pago o sucursal (el desglose entre sucursales solo está habilitado para administradores), además de comparaciones y tendencias. Usa analyze_inventory para stock por producto, categoría o sucursal y alertas de mínimo. Estas tools ejecutan consultas agregadas y parametrizadas en PostgreSQL; no propongas ni inventes SQL.",
+    "Al buscar productos, interpreta el concepto que describe la persona y tradúcelo a palabras que sí podrían figurar en el catálogo: por ejemplo 'algo abrigado para el frío' puede buscar suéter, chompa o chaqueta. Conserva también las palabras originales y usa hasta 4 alternativas pertinentes entre sinónimos regionales, materiales o tipos de prenda probables, plural/singular y errores de escritura. No inventes atributos que el catálogo no almacena. Nunca reemplaces un SKU o código de barras con sinónimos. En filtros de producto de analyze_sales y analyze_inventory, pasa el nombre original en producto y, si aplica, alternativas_producto: la tool lo resuelve al producto canónico antes de consultar; si hay varios posibles, informa cuáles y pide acotar. Si la persona pide una categoría, usa el filtro de categoría.",
+    "Si la pregunta contiene varias condiciones, cubrilas en la consulta y explica el criterio usado. Si falta un detalle menor, usa un valor razonable y dilo; pide aclaración solo cuando cambie materialmente la respuesta.",
+    "Si piden comparar dos productos y el filtro admite uno solo, consulta cada producto por separado con el mismo rango y sucursal, y luego compara resultados equivalentes. Para comparar categorías, usa una agrupación por categoría cuando sea posible. No sumes ni mezcles los resultados de productos distintos.",
+    "Al combinar resultados de varias tools, compara períodos y sucursales equivalentes. Distingue ventas netas, detalle de productos y valor referencial a precio de catálogo; ese valor no es costo de compra ni margen.",
+    "Para consultas difíciles trabaja en etapas: identifica la pregunta de negocio y sus criterios, ejecuta las consultas mínimas que cubren todos los criterios y revisa que los resultados comparados compartan rango, sucursal y métrica. Si falta un dato, consulta otra dimensión compatible antes de concluir. No hagas una llamada aislada si la pregunta pide comparar productos, explicar una variación o relacionar ventas con inventario.",
+    "En la respuesta final no uses frases vacías como 'listo' o 'aquí tienes'. Empieza con la respuesta directa; luego cita de 2 a 4 cifras o filas que la sostienen; explica qué cambió o qué patrón aparece; termina con una acción concreta solo cuando los datos la respalden. Di el rango y la sucursal. Separa hechos de interpretación, marca cuando una explicación sea una hipótesis y reconoce si los datos no alcanzan para responder.",
+    "No reveles razonamiento interno paso a paso. Puedes resumir el método de consulta y mostrar los datos, supuestos y cálculos que justifican la conclusión.",
     "La moneda es boliviano (Bs.). Al mencionar precios escribí siempre Bs. (ej. Bs. 35,00). Nunca uses $, USD ni dólares.",
-    "Para vender, llamá propose_sale con cada producto que dijo el usuario (el nombre aproximado vale: 'sombra para cejas delicadas', 'adhesivo de pestañas') y la cantidad. Si ya hay un carrito armado, los productos nuevos se suman al mismo carrito.",
+    "Para vender, llamá propose_sale con cada producto que dijo el usuario (el nombre aproximado vale: 'sombra para cejas delicadas', 'adhesivo de pestañas'), alternativas regionales solo si corresponden y la cantidad. Si ya hay un carrito armado, los productos nuevos se suman al mismo carrito.",
     "Si el usuario pide agregar otro producto a la venta en curso, llamá propose_sale otra vez con el producto adicional; no reinicies la venta.",
     "propose_sale y propose_product_registration NO registran nada: solo arman una propuesta para confirmación en pantalla.",
-    "Para ventas usá get_sales_summary con periodo 'hoy', 'semana' (últimos 7 días), 'mes' (mes calendario) o 'dia' con dias_atras (1=ayer, 3=hace 3 días). Si preguntan 'y hace 3 días?' o 'ventas de ayer', usá periodo='dia' con el dias_atras correcto; no uses 'semana' salvo que pidan la semana o los últimos 7 días.",
+    "Para una cifra sencilla de ventas usá get_sales_summary con periodo 'hoy', 'semana' (últimos 7 días), 'mes' (mes calendario) o 'dia' con dias_atras (1=ayer, 3=hace 3 días). Para desgloses o comparaciones usá analyze_sales.",
     "Para rotación, prendas estrella o capital inmovilizado usá get_rotation_analysis (15/30/60/90 días).",
-    "Para historial de entradas, salidas o kardex usá get_kardex. Si nombran un producto, pasá query.",
+    "Para historial de entradas, salidas o kardex usá get_kardex. Si nombran un producto, pasá query y alternativas cuando el vocabulario regional difiera del catálogo.",
     "El stock es el actual (no histórico). Si piden 'stock de la semana' probablemente quieren ventas → get_sales_summary; si quieren inventario actual → list_inventory o get_stock.",
     `Sucursal activa: ${scope.activeBranchName ?? "ninguna"}.`,
     `Sucursales habilitadas: ${sucursales}.`,
     "Si propose_sale o search_products devuelven candidatos, no preguntes el SKU: la app muestra el selector. Solo pedí un nombre más claro si la tool no encontró nada.",
     "Si el usuario corrige una cantidad (por ejemplo \"sino 5\"), usá el producto del historial.",
     "Si el historial trae \"Código de barras escaneado: <ean>\", ese EAN es codigo_barra. Usalo al registrar o al buscar; no lo pidas de nuevo si el usuario dice que ya te lo pasó.",
-    "Si el usuario pide listar, dictar u ordenar productos ('díctame de menor a mayor', 'de menor a mayor', 'de mayor a menor', 'qué productos hay'), llamá SIEMPRE list_inventory con orden='asc' (menor a mayor stock) o orden='desc' (mayor a menor stock). NUNCA llames list_low_stock para ordenar de menor a mayor.",
-    "Si el usuario pide que le dictes o menciones los productos (ej. 'díctame de menor a mayor'): enumerá en tu texto los primeros 3 a 5 productos con su stock ordenado (ej. '1) Nombre: X u., 2) Nombre: Y u...') y aclará que la lista completa está abajo en pantalla.",
-    "Si no pidieron dictar, no enumeres todos los ítems: la app los muestra en una tarjeta. Respondé en 1 o 2 frases: cuántos hay, sucursal y el criterio de orden.",
+    "Si piden una lista de productos u ordenamiento de existencias, usá list_inventory con orden='asc' (menor stock primero) u orden='desc' (mayor stock primero); list_low_stock es solo para productos que requieren reposición.",
+    "Si piden dictar la lista, menciona en el texto los primeros 3 a 5 productos con cantidad y avisa que el resto aparece en pantalla. En otras consultas de lista, resume el total y criterio; la app muestra el detalle.",
   ].join("\n");
 }
 
@@ -88,16 +100,18 @@ function toolOutputsFromResult(result: {
       if (entry.toolName) fromSteps.push({ toolName: entry.toolName, output: entry.output });
     }
   }
-  return fromSteps;
+  return fromSteps.length > 0 ? fromSteps : fromTop;
 }
 
-function thoughtsFromResult(
+function activitiesFromResult(
   providerLabel: string,
   outputs: Array<{ toolName: string }>,
+  stepCount: number,
 ): string[] {
-  const thoughts = [`Proveedor: ${providerLabel}`];
-  for (const output of outputs) thoughts.push(`Tool: ${output.toolName}`);
-  return thoughts;
+  const activities = [`Proveedor: ${providerLabel}`];
+  if (stepCount > 0) activities.push(`Se completaron ${stepCount} pasos del agente`);
+  for (const output of outputs) activities.push(toolProgressLabel(output.toolName));
+  return activities;
 }
 
 const TOOL_PROGRESS_LABEL: Record<string, string> = {
@@ -106,6 +120,8 @@ const TOOL_PROGRESS_LABEL: Record<string, string> = {
   list_low_stock: "Buscando productos con stock bajo",
   list_inventory: "Consultando el inventario de la sucursal",
   get_sales_summary: "Consultando ventas",
+  analyze_sales: "Analizando ventas en Supabase",
+  analyze_inventory: "Analizando inventario en Supabase",
   get_rotation_analysis: "Analizando rotación de productos",
   get_kardex: "Consultando movimientos del kardex",
   propose_sale: "Preparando la propuesta de venta",
@@ -139,7 +155,7 @@ export type RunAssistantTurnInput = {
   abortSignal?: AbortSignal;
 };
 
-type AssistantTools = NonNullable<Parameters<typeof streamText>[0]["tools"]>;
+type AssistantTools = ToolSet;
 
 type TurnCallInput = {
   resolved: ResolvedAssistantModel;
@@ -147,6 +163,7 @@ type TurnCallInput = {
   messages: ModelMessage[];
   tools: AssistantTools;
   abortSignal: AbortSignal;
+  maxSteps: number;
   onProgress?: (progress: AssistantTurnProgress) => void;
   onFailure?: (error: unknown) => void;
 };
@@ -180,8 +197,18 @@ export function isRetryableAssistantResult(result: ResultadoInterpretacion): boo
   return result.tipo === "aclaracion" && result.retryable === true;
 }
 
-const STREAM_TIMEOUT_MS = 20_000;
-const TURN_STEP_LIMIT = 4;
+export type AssistantRequestBudget = { maxSteps: number; timeoutMs: number; totalTimeoutMs: number };
+
+const COMPLEX_REQUEST_PATTERN = /\b(compara|comparar|comparaci[oó]n|variaci[oó]n|diferencia|tendencia|evoluci[oó]n|creci[oó]|disminu|cayer|vendid|an[aá]lisis|analiza|desglos|rentabilidad|margen|rotaci[oó]n|reposici[oó]n|reponer|desabastecimiento|sobreinventario|estancad|por categor[ií]a|por producto|por sucursal|entre .+ y .+|contra|frente al mes|quiebre|anomal[ií]a|predic|mejores productos|m[aá]s vendidos)\b/i;
+
+export function assistantRequestBudget(text: string): AssistantRequestBudget {
+  const complex = text.trim().length >= 140
+    || COMPLEX_REQUEST_PATTERN.test(text)
+    || (text.match(/\b(y|adem[aá]s|tambi[eé]n)\b/gi)?.length ?? 0) >= 2;
+  return complex
+    ? { maxSteps: 12, timeoutMs: 90_000, totalTimeoutMs: 120_000 }
+    : { maxSteps: 6, timeoutMs: 30_000, totalTimeoutMs: 45_000 };
+}
 
 function startTimeout(ms: number, parentSignal?: AbortSignal): { controller: AbortController; cancel: () => void } {
   const controller = new AbortController();
@@ -213,26 +240,39 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
     const label = `${input.resolved.providerId} · ${input.resolved.modelId}`;
     input.onProgress?.({ text: "", thoughts: [`Proveedor: ${label}`, "Conectando con el proveedor…"] });
 
-    const result = streamText({
+    const agent = new ToolLoopAgent({
       model: input.resolved.model,
       instructions: input.instructions,
-      messages: input.messages,
       tools: input.tools,
-      stopWhen: isStepCount(TURN_STEP_LIMIT),
-      abortSignal: input.abortSignal,
+      stopWhen: isStepCount(input.maxSteps),
+      reasoning: input.maxSteps > 6 ? "high" : "medium",
+      providerOptions: input.resolved.providerId === "groq" && /openai\/gpt-oss-(20|120)b/i.test(input.resolved.modelId)
+        ? { groq: { reasoningEffort: input.maxSteps > 6 ? "high" : "medium" } }
+        : input.resolved.providerId === "cerebras" && /gpt-oss-120b/i.test(input.resolved.modelId)
+          ? { cerebras: { reasoningEffort: input.maxSteps > 6 ? "high" : "medium" } }
+          : undefined,
       maxRetries: 0,
-      onError: () => undefined,
+    });
+    let streamedText = "";
+    const result = await agent.stream({
+      messages: input.messages,
+      abortSignal: input.abortSignal,
+      onStepStart: ({ stepNumber }) => {
+        input.onProgress?.({
+          text: streamedText,
+          thoughts: [`Proveedor: ${label}`, `Preparando la consulta · paso ${stepNumber + 1} de ${input.maxSteps}`],
+        });
+      },
     });
 
-    let streamed = "";
     let streamFailed = false;
     let streamError: unknown;
     try {
       for await (const chunk of result.textStream) {
-        streamed += chunk;
+        streamedText += chunk;
         input.onProgress?.({
-          text: normalizarMonedaAsistente(streamed),
-          thoughts: [`Proveedor: ${label}`, streamed.trim() ? "Sigue escribiendo la respuesta…" : "Sigue trabajando…"],
+          text: normalizarMonedaAsistente(streamedText),
+          thoughts: [`Proveedor: ${label}`, streamedText.trim() ? "Redactando la respuesta…" : "Consultando y relacionando datos…"],
         });
       }
     } catch (error) {
@@ -240,7 +280,7 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
       streamError = error;
     }
 
-    const text = normalizarMonedaAsistente((await awaitMaybe(result.text, streamed)) || streamed);
+    const text = normalizarMonedaAsistente((await awaitMaybe(result.text, streamedText)) || streamedText);
     const toolResults = await awaitMaybe(result.toolResults, []);
     const steps = await awaitMaybe(result.steps, []);
     await awaitMaybe(result.finishReason, undefined);
@@ -259,7 +299,7 @@ async function completeTurnWithStream(input: TurnCallInput): Promise<ResultadoIn
       return null;
     }
 
-    const thoughts = thoughtsFromResult(`${label} · stream`, outputs);
+    const thoughts = activitiesFromResult(`${label} · agente`, outputs, steps.length);
     input.onProgress?.({ text, thoughts });
     return mapToolOutputsToResult(outputs, text, thoughts);
   } catch (error) {
@@ -319,9 +359,18 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
     ? `${instructions}\nCódigo de barras reciente en esta conversación: ${barcode}. Si el usuario registra un producto, pasalo en codigo_barra.`
     : instructions;
   const messages: ModelMessage[] = [...toModelMessages(input.history), { role: "user", content: phrase }];
+  const budget = assistantRequestBudget(phrase);
+  const turnDeadline = Date.now() + budget.totalTimeoutMs;
   let lastError: unknown;
 
   for (const resolved of models) {
+    const remainingMs = turnDeadline - Date.now();
+    if (remainingMs <= 0) {
+      const timeoutError = new Error("Request timed out");
+      timeoutError.name = "AbortError";
+      lastError = timeoutError;
+      break;
+    }
     if (input.abortSignal?.aborted) {
       const cancelledError = new Error("Request cancelled");
       cancelledError.name = "AbortError";
@@ -333,6 +382,7 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
       instructions: instructionsWithBarcode,
       messages,
       tools,
+      maxSteps: budget.maxSteps,
       onProgress: (progress: AssistantTurnProgress) => {
         latestText = progress.text;
         input.onProgress?.(progress);
@@ -341,7 +391,7 @@ export async function runAssistantTurn(input: RunAssistantTurnInput): Promise<Re
         lastError = error;
       },
     };
-    const streamAttempt = startTimeout(STREAM_TIMEOUT_MS, input.abortSignal);
+    const streamAttempt = startTimeout(Math.min(budget.timeoutMs, remainingMs), input.abortSignal);
     try {
       const streamed = await completeTurnWithStream({ ...callBase, abortSignal: streamAttempt.controller.signal });
       if (streamed) return streamed;

@@ -226,6 +226,39 @@ export type Database = {
           },
         ]
       }
+      perfil_sucursales: {
+        Row: {
+          created_at: string
+          perfil_id: string
+          sucursal_id: number
+        }
+        Insert: {
+          created_at?: string
+          perfil_id: string
+          sucursal_id: number
+        }
+        Update: {
+          created_at?: string
+          perfil_id?: string
+          sucursal_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perfil_sucursales_perfil_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "perfiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perfil_sucursales_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       perfiles: {
         Row: {
           created_at: string
@@ -430,6 +463,64 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assistant_analyze_inventory: {
+        Args: {
+          p_branch_id?: number | null
+          p_category_filter?: string | null
+          p_group_by: string
+          p_limit?: number
+          p_only_below_minimum?: boolean
+          p_product_query?: string | null
+        }
+        Returns: Json
+      }
+      assistant_analyze_sales: {
+        Args: {
+          p_branch_id?: number | null
+          p_category_filter?: string | null
+          p_compare_from?: string | null
+          p_compare_to?: string | null
+          p_from: string
+          p_group_by: string
+          p_limit?: number
+          p_payment_method?: string | null
+          p_product_query?: string | null
+          p_to: string
+        }
+        Returns: Json
+      }
+      assistant_search_products: {
+        Args: { p_match_count?: number; p_query: string }
+        Returns: {
+          cantidad: number
+          categoria: string
+          codigo: string
+          codigo_barra: string | null
+          exact_match: boolean
+          id: number
+          lexical_score: number
+          nombre: string
+          precio: number
+          stock_minimo: number
+          subcategoria: string | null
+        }[]
+      }
+      get_user_ai_secrets: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      save_user_ai_secret: {
+        Args: { p_api_key: string; p_custom_model?: string | null; p_provider: string }
+        Returns: undefined
+      }
+      delete_user_ai_secret: {
+        Args: { p_provider: string }
+        Returns: undefined
+      }
+      save_user_ai_preferences: {
+        Args: { p_preferred_mode: string }
+        Returns: undefined
+      }
       admin_actualizar_perfil: {
         Args: { p_rol: string; p_sucursal_id: number; p_user_id: string }
         Returns: Json

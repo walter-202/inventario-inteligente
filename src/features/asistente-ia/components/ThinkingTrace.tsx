@@ -18,9 +18,8 @@ function formatElapsed(ms: number): string {
 }
 
 /**
- * Indicador de pensamientos y razonamiento al estilo Claude, ChatGPT y Gemini.
- * Mientras corre, muestra un spinner y el tiempo transcurrido para que se note
- * que sigue ejecutando aunque el modelo no emita texto.
+ * Muestra actividad observable del agente y el tiempo transcurrido. No expone
+ * ni afirma representar el razonamiento interno del modelo.
  */
 export function ThinkingTrace({ thoughts, durationMs, isActive, activeStatusText }: ThinkingTraceProps) {
   const [expanded, setExpanded] = useState(false);
@@ -40,7 +39,7 @@ export function ThinkingTrace({ thoughts, durationMs, isActive, activeStatusText
   if (isActive) {
     const status = activeStatusText?.trim() || thoughts?.[thoughts.length - 1] || "Pensando…";
     const headline = elapsedMs < 1000 ? "Trabajando…" : `Sigue trabajando · ${formatElapsed(elapsedMs)}`;
-    const hint = elapsedMs >= 8000 ? "Sigue consultando, no se trabó." : status;
+    const hint = elapsedMs >= 8000 ? "Las consultas complejas pueden tardar un poco más." : status;
     return (
       <Surface style={styles.activeContainer} elevation={0}>
         <View style={styles.activeRow}>
@@ -72,7 +71,7 @@ export function ThinkingTrace({ thoughts, durationMs, isActive, activeStatusText
         <View style={styles.headerLeft}>
           <Sparkles size={13} color={colors.textSecondary} />
           <Text variant="labelSmall" style={styles.headerTitle}>
-            Razonamiento ({thoughts.length} pasos{durationText})
+            Actividad ({thoughts.length} pasos{durationText})
           </Text>
         </View>
         {expanded ? (

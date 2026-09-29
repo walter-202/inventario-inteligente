@@ -47,6 +47,9 @@ async function resolveFetch(): Promise<typeof globalThis.fetch> {
 }
 
 function withStringToolInputs(model: LanguageModel): LanguageModel {
+  if (typeof model === "string") {
+    throw new TypeError("Se esperaba una instancia ejecutable de modelo, no una referencia global.");
+  }
   return wrapLanguageModel({
     model,
     middleware: {
